@@ -20,8 +20,11 @@
 . ./messages.sh
 . ./vars.sh
 . ./secrets.sh
+. ./logging.sh
+. ./utils.sh
 
 print_message "Preparing the script and starting fetching the cards"
+prepare_logging "trello"
 
 set -euo pipefail
 # set -x
@@ -32,12 +35,9 @@ BOARD_ID="KOfBQFVg"
 # Output CSV file
 OUTPUT_FILE="trello_cards_$2.ssv"
 
-EPISODE_DIR=""$COWSAY_DIR"$2"
+prepare_dir "$2" > "$LOG" 2>&1
 
-if [ ! -d "$EPISODE_DIR" ]; then
-    mkdir -p "$EPISODE_DIR" > "$LOG" 2>&1
-fi
-cd "$EPISODE_DIR" > "$LOG" 2>&1
+rm -f "$OUTPUT_FILE"
 
 # Base API URL
 BASE_URL="https://api.trello.com/1"

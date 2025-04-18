@@ -50,7 +50,7 @@ fi
 
 # Dirs
 
-EPISODE_DIR=""$COWSAY_DIR"$1"
+EPISODE_DIR=""$COWSAY_DIR"/$1"
 
 if [ ! -d "$EPISODE_DIR" ]; then
     mkdir -p "$EPISODE_DIR" > "$LOG" 2>&1

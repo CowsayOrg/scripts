@@ -19,6 +19,7 @@
 . ./messages.sh
 . ./logging.sh
 . ./vars.sh
+. ./utils.sh
 
 print_message "Preparing to execute the script"
 
@@ -46,12 +47,7 @@ fi
 
 # Dirs
 
-EPISODE_DIR=""$COWSAY_DIR"$1"
-
-if [ ! -d "$EPISODE_DIR" ]; then
-    mkdir -p "$EPISODE_DIR" > "$LOG" 2>&1
-fi
-cd "$EPISODE_DIR" > "$LOG" 2>&1
+prepare_dir "$1"
 
 INPUT_FILE="Records-$1.csv"
 INTERMEDIETE_FILE="temp.csv"

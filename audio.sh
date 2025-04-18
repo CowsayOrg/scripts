@@ -3,19 +3,13 @@
 . ./messages.sh
 . ./logging.sh
 . ./vars.sh
-
-prepare_directory() {
-    EPISODE_DIR=""$COWSAY_DIR"$EPISODE_NUMBER"
-
-    if [ ! -d "$EPISODE_DIR" ]; then
-        mkdir -p "$EPISODE_DIR" > "$LOG" 2>&1
-    fi
-    cd "$EPISODE_DIR" > "$LOG" 2>&1
-
-    CUT=$(cat "cut-$EPISODE_NUMBER.txt")
-}
+. ./utils.sh
 
 prepare_raw() {
+    if [ "$REWRITE" = true ]; then
+        rm "$RAW"
+    fi
+
     if [ -f "$RAW" ]; then
         print_message "RAW file already exists"
         return 0
@@ -60,6 +54,16 @@ youtube_download() {
 }
 
 crop() {
+    if [ "$TESTRUN" = true ]; then
+        print_message "No cropping on test run"
+        CROPPED="$RAW"
+        return 0
+    fi
+
+    if [ "$REWRITE" = true ]; then
+        rm "$CROPPED"
+    fi
+
     if [ -f "$CROPPED" ]; then
         print_message "CROPPED file already exists"
         return 0
@@ -71,6 +75,10 @@ crop() {
 }
 
 add_compression() {
+    if [ "$REWRITE" = true ]; then
+        rm "$COMPRESSED"
+    fi
+
     if [ -f "$COMPRESSED" ]; then
         print_message "COMPRESSED file already exists"
         return 0
@@ -82,6 +90,10 @@ add_compression() {
 }
 
 add_metadata() {
+    if [ "$REWRITE" = true ]; then
+        rm "$FINAL"
+    fi
+
     if [ -f "$FINAL" ]; then
         print_message "FINAL file already exists"
         return 0
@@ -99,7 +111,12 @@ add_metadata() {
 }
 
 clean() {
-    # print_message "Cleaning up the environment"
+    if [ "$TESTRUN" = true ]; then
+        print_message "No cleaning on test run"
+        return 0
+    fi
+
+    print_message "Cleaning up the environment"
     rm "$CROPPED" > "$LOG" 2>&1
     rm "$COMPRESSED" > "$LOG" 2>&1
 }
@@ -152,10 +169,12 @@ EPISODE_NUMBER=""
 FILE_SOURCE=""
 YOUTUBE_URL=""
 UPLOAD=false
+TESTRUN=false
+REWRITE=false
 
 # Read Arguments
 
-while getopts ":e:y:l:u" opt; do
+while getopts ":e:y:l:utr" opt; do
     case ${opt} in
         e )
             EPISODE_NUMBER=$OPTARG
@@ -168,6 +187,12 @@ while getopts ":e:y:l:u" opt; do
             ;;
         u ) 
             UPLOAD=true
+            ;;
+        t )
+            TESTRUN=true
+            ;;
+        r )
+            REWRITE=true
             ;;
         \? )
             echo "Invalid option: -$OPTARG (-e -y/-l [-u])" >&2
@@ -191,7 +216,10 @@ CROPPED="cropped$EPISODE_NUMBER.mp3"
 COMPRESSED="compressed$EPISODE_NUMBER.mp3"
 FINAL="cow$EPISODE_NUMBER.mp3"
 
-prepare_directory
+prepare_dir "$EPISODE_NUMBER"
+
+CUT=$(cat "cut-$EPISODE_NUMBER.txt")
+
 prepare_raw
 crop
 
@@ -209,14 +237,21 @@ else
     exit 0
 fi
 
-add_compression
+if [ "$TESTRUN" = false ]; then
+    add_compression
+else
+    print_message "No compression on test run"
+    COMPRESSED="$CROPPED"
+fi
+
 add_metadata
-clean
 
 if [ "$UPLOAD" = "false" ]; then
     print_success "The script has finished successfuly without file upload 🐮."
+    clean
     exit 0
 fi
 
 azure_upload
 print_success "Audio file is successfully prepared and uploaded 🐮."
+clean
