@@ -1,0 +1,9 @@
+ffmpeg
+yt-dlp
+azcopy
+csvformat
+git
+bundler
+jekyll
+octopod
+jq

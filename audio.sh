@@ -45,8 +45,8 @@ youtube_download() {
     if ! command -v yt-dlp > "$LOG" 2>&1
     then
         check-brew
-        print_message "You miss Youtube-dl. Installing it..."
-        brew install yt-dlp
+        print_error "You miss Youtube-dl. Please install all the dependencies from requirements.txt"
+        exit 1
     fi
 
     print_message "Downloading audio from the video: "$YOUTUBE_URL""
