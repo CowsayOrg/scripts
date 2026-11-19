@@ -129,6 +129,6 @@ echo "$HEADER" >> "$OUTPUT_FILE"
 cat "$TOPICS_FILE" >> "$OUTPUT_FILE"
 echo "$FOOTER" >> "$OUTPUT_FILE"
 
-cp "$OUTPUT_FILE" ~/Code/Personal/cowsay-source/_posts/"$OUTPUT_FILE" > "$LOG" 2>&1
+cp "$OUTPUT_FILE" "$COWSAY_SOURCE""$OUTPUT_FILE" > "$LOG" 2>&1
 
 print_success "New episode MD file has been created and copied over to cowsay_source dir"

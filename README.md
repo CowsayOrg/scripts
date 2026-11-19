@@ -7,11 +7,19 @@
   * COWSAY_DIR: where you want to store all the working files, mp3's, csv's, txt's etc.
   * COVER: cowsay podcast cover image for adding meta to resulting file.
   * AZURE_DIR: azure file storage URL used for upload.
-  * COWSAY_SOURCE: cowsay site sources location.
-  * GITHUB_CERT_PATH: for updating repo with new episode.
-  * AZURE_CERT_PATH: for updating cowsay site on Azure hosting.
+  * COWSAY_SOURCE: cowsay site sources location (its `_posts` dir).
+  * SITE_DIR: the built site (`_site` inside the site sources). It must be a git clone of SITE_REPO.
+  * SITE_REPO: GitHub repo the built site is pushed to. Cloudflare Pages deploys cowsay.show from it.
+  * GITHUB_CERT_PATH: for pushing the site sources and the built site to Github.
   * LOCAL_ADDRESS: likely stays the same, for testing, local server.
   * PUBLIC_ADDRESS: also less probable to change, but who knows, cowsay show public site URL.
+6. Clone the built site repo into `_site` once, so publish.sh can push to it:
+```bash
+git clone git@github.com:CowsayOrg/CowsayOrg.github.io.git /Users/user/Code/Cowsay/cowsay-source/_site
+```
+
+## Deploy
+The site is deployed by Cloudflare Pages. publish.sh builds the site with `bundle exec octopod b`, then commits and pushes the contents of `_site` to SITE_REPO. Cloudflare Pages picks up the push and deploys it. The site sources are committed and pushed to their own repo afterwards. `octopod deploy` (rsync over ssh) is not used anymore.
 
 ## How to use the scripts
 1. Before running the show use trello.sh to download the topics in a csv file.

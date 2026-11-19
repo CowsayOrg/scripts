@@ -44,15 +44,20 @@ if [ $OS != "Darwin" ]; then
 fi
 
 # Check for certificates to be there
-print_message "Add Github and Azure certificates"
+print_message "Add Github certificate"
 cd ~/.ssh
 ssh-add "$GITHUB_CERT_PATH" > "$LOG" 2>&1
-ssh-add "$AZURE_CERT_PATH" > "$LOG" 2>&1
 
 # Go to cowsay source
 
 cd "$COWSAY_SOURCE"
 cd ..
+
+# _site must be a clone of the GitHub Pages repo that Cloudflare Pages deploys from
+if ! git -C "$SITE_DIR" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    print_error "$SITE_DIR is not a git repository. Clone $SITE_REPO into it first"
+    exit 1
+fi
 
 # Run server and open the page to check
 print_message "Launching the server... openning the page"
@@ -76,20 +81,35 @@ if [ -z "$ANSWER" ]; then
     exit 0
 elif [ "$ANSWER" = "y" ]; then
     bundle exec octopod b > "$LOG" 2>&1
-    bundle exec octopod deploy > "$LOG" 2>&1
 else
     print_error "Not using this variant, please run the script again"
     exit 0
 fi
 
-print_success "Site is successfully deployed 🐮"
+# Deploy: push the built site to GitHub, Cloudflare Pages picks it up from there
+
+print_message "Pushing the built site to $SITE_REPO"
+
+git -C "$SITE_DIR" add -A > "$LOG" 2>&1
+if git -C "$SITE_DIR" diff --cached --quiet; then
+    print_message "The built site has no changes, nothing to deploy"
+else
+    git -C "$SITE_DIR" commit -m "Episode $1" > "$LOG" 2>&1
+    git -C "$SITE_DIR" push > "$LOG" 2>&1
+fi
+
+print_success "Site is pushed, Cloudflare Pages will deploy it shortly 🐮"
 
 open "$PUBLIC_ADDRESS"
 
-# Update repo
+# Update source repo
 
 git add . > "$LOG" 2>&1
-git commit -m "Episode $1" > "$LOG" 2>&1
+if git diff --cached --quiet; then
+    print_message "The site source has no changes to commit"
+else
+    git commit -m "Episode $1" > "$LOG" 2>&1
+fi
 git push > "$LOG" 2>&1
 
 print_success "The new episode is pushed to Github 🐮"
