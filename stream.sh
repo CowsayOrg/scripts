@@ -4,7 +4,7 @@
 #
 # Usage: ./stream.sh -e <episode> [-r] [-v]
 #
-# Output: $COWSAY_DIR/<ep>/stream-<ep>.json  {id, url, title, duration, episode, vertical_id?}
+# Output: $COWSAY_DIR/<ep>/stream-<ep>.json  {id, url, title, duration, episode, vertical_id?, streamed_at, date}
 # An existing stream-<ep>.json is reused unless -r is given (for example after the title was
 # edited on YouTube).
 
@@ -41,8 +41,25 @@ prepare_dir "$EPISODE_NUMBER"
 
 OUTPUT="stream-$EPISODE_NUMBER.json"
 
+# add_stream_date: saves when the stream started (streamed_at, epoch) and its date in the show's
+# time zone (date, YYYY-MM-DD), used as the post date. Not in the channel listing, so one yt-dlp call.
+add_stream_date() {
+    local ts
+    ts=$(yt-dlp --skip-download --print "%(release_timestamp)s %(timestamp)s" "$(jq -r '.url' "$OUTPUT")" 2>> "$LOG" \
+        | tr ' ' '\n' | grep -E '^[0-9]+$' | head -1 || true)
+    if [ -z "$ts" ]; then
+        print_error "Could not get the stream date, the post will be dated today"
+        return 0
+    fi
+    jq --argjson ts "$ts" --arg d "$(TZ="$SHOW_TIMEZONE" date -r "$ts" +%Y-%m-%d)" '.streamed_at = $ts | .date = $d' "$OUTPUT" > "$OUTPUT.tmp"
+    mv "$OUTPUT.tmp" "$OUTPUT"
+}
+
 if [ -s "$OUTPUT" ] && [ "$REWRITE" = false ]; then
-    print_message "YouTube stream: $(jq -r '.title' "$OUTPUT") ($(jq -r '.url' "$OUTPUT"))"
+    if [ -z "$(jq -r '.date // empty' "$OUTPUT")" ]; then
+        add_stream_date    # saved before the date was
+    fi
+    print_message "YouTube stream: $(jq -r '.title' "$OUTPUT") ($(jq -r '.url' "$OUTPUT"), streamed $(jq -r '.date // "?"' "$OUTPUT"))"
     exit 0
 fi
 
@@ -59,4 +76,5 @@ if [ -z "$STREAM" ]; then
 fi
 
 print -r -- "$STREAM" > "$OUTPUT"
-print_success "YouTube stream: $(jq -r '.title' "$OUTPUT") ($(jq -r '.url' "$OUTPUT"))"
+add_stream_date
+print_success "YouTube stream: $(jq -r '.title' "$OUTPUT") ($(jq -r '.url' "$OUTPUT"), streamed $(jq -r '.date // "?"' "$OUTPUT"))"

@@ -118,6 +118,7 @@ ELEVENLABS_API_KEY="sk_..."    # ElevenLabs speech-to-text
 | `YT_BASE_TAGS` | Tags every episode gets, before the topic titles |
 | `YT_CAPTION_NAME` | Name of our caption track, so reruns find it |
 | `YT_ALIGN_MIN_MATCHES` | Words `yt-align.sh` needs to trust a measured offset (`30`) |
+| `SHOW_TIMEZONE` | Time zone of the show (`Europe/Chisinau`). The post date is the stream's date there |
 | `SITE_FEED_URL` | The site's podcast feed, the list of published episodes (`https://cowsay.show/episodes.mp3.rss`) |
 
 ### 2.4 Cloudflare R2 (audio hosting)
@@ -304,7 +305,8 @@ Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combine
 
 It lists the latest `$STREAM_SEARCH_DEPTH` streams of `$YOUTUBE_CHANNEL_STREAMS` with `yt-dlp --flat-playlist`, a quick listing that needs no API key. It then picks the stream whose title has the episode number after "live", case-insensitive, so it matches "Live 173: …" and "LIVE DE URGENȚĂ 174: …". The vertical copy, whose title ends in "📱", is skipped.
 
-- **Output:** `stream-<ep>.json` `{id, url, title, duration, episode}`. It's reused on later runs; `-r` looks the stream up again.
+- **Output:** `stream-<ep>.json` `{id, url, title, duration, episode, vertical_id, streamed_at, date}`. It's reused on later runs; `-r` looks the stream up again.
+- **Stream date:** `streamed_at` is when the stream started (yt-dlp's `release_timestamp`; one extra call, since the channel listing has no dates), and `date` is that day in `$SHOW_TIMEZONE`. It's the post date. Files saved before the date existed get it on the next run.
 - **Cache:** the channel listing is kept in `$COWSAY_DIR/.streams.json` for 10 minutes, so `-a` lists the channel only once. The helpers are in `yt-helpers.sh`; the API helpers are in `yt-api.sh`.
 - **No match:** it fails with a hint to use `-n` and `-l`/`-y`.
 
@@ -566,7 +568,11 @@ The title is optional; without it, the title in `stream-<ep>.json` is used.
   - the Podigee player tag;
   - the header, the topics and the footer.
 
-If a post for the episode already exists in `_posts`, possibly from an earlier date, it's regenerated in place with its original file name and date, so there's never a second post for the same episode.
+**Post date:** the day the episode was streamed (`date` in `stream-<ep>.json`), so an old episode run through the scripts isn't dated today. It falls back to today only without a stream date.
+
+If a post for the episode already exists in `_posts`, it's regenerated in place, so there's never a second post for the same episode. Its date depends on whether it's committed:
+- **Committed:** it keeps its date even when that differs from the stream date. The date is in its URL and its feed id, and changing them would make podcast apps see a new episode. You get a warning.
+- **Not committed:** a post with the wrong date is moved to the stream date.
 
 The Podigee player shows the chapters (Octopod reads `chapter[0..12]` as the start), and the RSS feed publishes them as `psc:chapters`.
 

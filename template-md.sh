@@ -93,12 +93,32 @@ DURATION=$(post_duration "$AUDIO_FILE_NAME")
 AUDIO_SIZE=$(stat -f%z "$AUDIO_FILE_NAME")
 
 # Regenerating an already existing post keeps its file name and date
+# Date: the day the episode was streamed (stream.sh), so an old episode isn't dated today.
+# A post that is already committed keeps its date: the date is in its URL and its feed id, and
+# changing it would make podcast apps see a new episode. An uncommitted post is moved to the right date.
+STREAM_DATE=""
+if [ -s "$STREAM_FILE" ]; then
+    STREAM_DATE=$(jq -r '.date // empty' "$STREAM_FILE")
+fi
 EXISTING_POST=$(find_post "$1")
 if [ -n "$EXISTING_POST" ]; then
     DATE="${${EXISTING_POST:t}[1,10]}"
-    print_message "Post ${EXISTING_POST:t} already exists, regenerating it with its original date"
+    if [ -n "$STREAM_DATE" ] && [ "$STREAM_DATE" != "$DATE" ]; then
+        if git -C "${EXISTING_POST:h}" ls-files --error-unmatch "${EXISTING_POST:t}" > /dev/null 2>&1; then
+            print_error "Post ${EXISTING_POST:t} is dated $DATE but the episode was streamed on $STREAM_DATE. It's already committed, so it keeps its date (rename it by hand if it was never published)"
+        else
+            print_message "Post ${EXISTING_POST:t} is dated $DATE, moving it to the stream date $STREAM_DATE"
+            rm -f "$EXISTING_POST" "$EPISODE_DIR/${EXISTING_POST:t}"
+            DATE="$STREAM_DATE"
+        fi
+    else
+        print_message "Post ${EXISTING_POST:t} already exists, regenerating it with its original date"
+    fi
+elif [ -n "$STREAM_DATE" ]; then
+    DATE="$STREAM_DATE"
 else
     DATE=$(date +"%Y-%m-%d")
+    print_message "No stream date (run stream.sh), dating the post today"
 fi
 DAY=$(date -j -f "%Y-%m-%d" "$DATE" +%e | tr -d ' ')
 DATE_NAME="$(date -j -f "%Y-%m-%d" "$DATE" +"%B %d")$(day_suffix "$DAY"), $(date -j -f "%Y-%m-%d" "$DATE" +%Y)"

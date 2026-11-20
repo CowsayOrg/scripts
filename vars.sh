@@ -48,3 +48,4 @@ YT_LANGUAGE="ro"
 YT_BASE_TAGS=("cowsay" "cowsay show" "podcast" "tech" "știri tech" "AI" "live")
 YT_CAPTION_NAME="Transcript Cowsay"             # our caption track, so reruns can find it
 YT_ALIGN_MIN_MATCHES=30                         # yt-align.sh: words needed to trust the measured offset
+SHOW_TIMEZONE="Europe/Chisinau"   # the post date is the stream's date in this time zone
