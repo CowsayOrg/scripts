@@ -19,10 +19,19 @@ prepare_raw() {
         print_message "RAW file already exists"
         return 0
     fi
+    if [ -n "$FILE_SOURCE" ] && [ "$FILE_SOURCE" = "${RAW:A}" ]; then
+        print_message "Using the existing $RAW"
+        return 0
+    fi
     rm -f "$RAW"
 
-    if [ -n "$FILE_SOURCE" ]; then
+    if [ -n "$FILE_SOURCE" ] && [[ "${(L)FILE_SOURCE:e}" == mp3 ]]; then
         cp "$FILE_SOURCE" "$RAW"
+    elif [ -n "$FILE_SOURCE" ]; then
+        # video or another audio format: keep only the audio, as mp3
+        check_ffmpeg
+        print_message "Extracting the audio from ${FILE_SOURCE:t}"
+        ffmpeg -nostdin -y -i "$FILE_SOURCE" -vn -c:a libmp3lame -q:a 2 "$RAW" >> "$LOG" 2>&1
     elif [ -n "$YOUTUBE_URL" ]; then
         youtube_download
     else
@@ -153,6 +162,9 @@ add_metadata() {
     print_message "Adding metadata to the mp3 file"
 
     TITLE="Live $EPISODE_NUMBER"
+    if [ -s "stream-$EPISODE_NUMBER.json" ]; then
+        TITLE=$(jq -r '.title' "stream-$EPISODE_NUMBER.json")
+    fi
     ARTIST="Cowsay Show"
     YEAR=$(date +%Y)
     GENRE="Podcast"

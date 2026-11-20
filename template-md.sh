@@ -36,14 +36,19 @@ set -euo pipefail
 print_message "Preparing to execute the script"
 
 # Check for episode number to be present
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     print_error "This script needs episode number in order to work"
     exit 1
 fi
 
-# Check for episode number to be present
-if [ -z "$2" ]; then
-    print_error "This script needs episode title in order to work"
+# Title: the argument, otherwise the YouTube stream title saved by stream.sh
+EPISODE_TITLE="${2:-}"
+STREAM_FILE="$COWSAY_DIR/$1/stream-$1.json"
+if [ -z "$EPISODE_TITLE" ] && [ -s "$STREAM_FILE" ]; then
+    EPISODE_TITLE=$(jq -r '.title' "$STREAM_FILE")
+fi
+if [ -z "$EPISODE_TITLE" ]; then
+    print_error "This script needs episode title in order to work (or run ./stream.sh -e $1 first)"
     exit 1
 fi
 
@@ -75,7 +80,7 @@ day_suffix() {
 }
 
 SQ="'"
-TITLE="${2//$SQ/$SQ$SQ}"    # single quotes are doubled inside a YAML '...' string
+TITLE="${EPISODE_TITLE//$SQ/$SQ$SQ}"    # single quotes are doubled inside a YAML '...' string
 AUDIO_FILE_NAME="cow"$1".mp3"            # local file
 AUDIO_OBJECT_NAME=$(r2_audio_name "$1")    # name in R2: cow<ep>.mp3 or cow<ep>-rev<n>.mp3 after a fix
 DURATION=$(post_duration "$AUDIO_FILE_NAME")

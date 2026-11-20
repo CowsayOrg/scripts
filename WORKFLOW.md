@@ -15,7 +15,8 @@ There is no manual step during the show anymore. After the show, the raw recordi
  ───────────────                         ───────────────────────────
  trello.sh ──► trello_cards_<ep>.ssv ─┐
                                       │   audio.sh
- raw recording (-l mp3 | -y url) ─────┼─►  raw ─► transcribe.sh ─► detect-cut.sh ─► crop ─► shift transcript
+ stream.sh (YouTube title, url) ──────┤
+ find-audio.sh (disk) or the stream ──┼─►  raw ─► transcribe.sh ─► detect-cut.sh ─► crop ─► shift transcript
                                       │        ─► preview y/n/<s> ─► compress ─► tag ─► R2 upload (-u)
                                       │
                                       └─► topics.sh (Claude) ─► Records-<ep>.csv ─► review y/n/e
@@ -31,6 +32,8 @@ There is no manual step during the show anymore. After the show, the raw recordi
 ```
 
 All per-episode working files are kept in `$COWSAY_DIR/<episode_number>/`.
+
+Only the episode number is needed: the title comes from the episode's YouTube stream, and the recording is found on disk or downloaded from the stream. `episode.sh -a` runs every episode that is on YouTube but not on cowsay.show yet.
 
 ### Two timelines
 
@@ -97,6 +100,11 @@ ELEVENLABS_API_KEY="sk_..."    # ElevenLabs speech-to-text
 | `CUT_PAD` | Seconds of silence kept before the first word (`0.3`) |
 | `CUT_DEFAULT` | Fallback cut offset in seconds when nothing is detected (`10`) |
 | `TRANSCRIPT_BLOCK` | Seconds per `[HH:MM:SS]` line in the transcript given to the LLM (`10`) |
+| `YOUTUBE_CHANNEL_STREAMS` | The channel's streams page (`https://www.youtube.com/@cowsay/streams`) |
+| `STREAM_SEARCH_DEPTH` | How many of the latest streams are listed (`150`, two per episode) |
+| `AUDIO_SEARCH_DIRS` | Where `find-audio.sh` looks for recordings besides the episode folder (`~/Downloads`) |
+| `AUDIO_DURATION_TOLERANCE` | Seconds a found recording may differ from the stream duration (`30`) |
+| `SITE_FEED_URL` | The site's podcast feed, the list of published episodes (`https://cowsay.show/episodes.mp3.rss`) |
 
 ### 2.4 Cloudflare R2 (audio hosting)
 
@@ -203,8 +211,11 @@ Nothing to record by hand. Optionally say **"cut"** on air right before the gree
 ### Step 3: Run the pipeline (after the show)
 
 ```bash
-./episode.sh -e 666 -n "Live 666: April's dry run" -l ~/Downloads/666.mp3 -u
+./episode.sh -e 666 -u     # one episode
+./episode.sh -a -u         # every unpublished episode
 ```
+
+The title is taken from the YouTube stream. The recording is taken from the episode folder or `~/Downloads` (for example the file YouTube Studio downloads, `Live 666_ April's dry run.mp3`), or downloaded from the stream if neither has it. Use `-n`, `-l` or `-y` to override them.
 
 Watch the console. Three steps stop and wait for you:
 
@@ -220,38 +231,92 @@ Watch the console. Three steps stop and wait for you:
 
 ### 5.1 `episode.sh`: orchestrator
 
-Runs the whole post-show pipeline.
+Runs the whole post-show pipeline for one episode (`-e`) or for every unpublished episode (`-a`).
 
 **Usage**
 
 ```bash
-./episode.sh -e <number> -n <title> (-l <path> | -y <url>) [-u] [-t] [-r] [-v]
+./episode.sh -e <number> [-n <title>] [-l <path> | -y <url>] [-u] [-t] [-r] [-v]
+./episode.sh -a [-u] [-t] [-r] [-v]
 ```
 
 | Flag | Argument | Required | Description |
 |------|----------|----------|-------------|
-| `-e` | `<number>` | yes | Episode number |
-| `-n` | `<title>` | yes | Episode title, used in the website post |
-| `-l` | `<path>` | one of `-l`/`-y` | Local recording to use as the source |
-| `-y` | `<url>` | one of `-l`/`-y` | YouTube URL to download the audio from |
+| `-e` | `<number>` | `-e` or `-a` | Episode number |
+| `-a` | – | `-e` or `-a` | Run every episode streamed on YouTube but not published on the site (see `unpublished.sh`) |
+| `-n` | `<title>` | no | Override the title (default: the YouTube stream title). Only with `-e` |
+| `-l` | `<path>` | no | Override the recording (default: found by `find-audio.sh`). Audio or video. Only with `-e` |
+| `-y` | `<url>` | no | Download the audio from this URL instead. Only with `-e` |
 | `-u` | – | no | Upload the final mp3 to R2 (passed to `audio.sh`) |
 | `-t` | – | no | Test run (passed to `audio.sh`) |
-| `-r` | – | no | Rebuild existing files (passed to `audio.sh` and `topics.sh`). The transcription stays cached |
+| `-r` | – | no | Rebuild existing files and look the stream up again (passed to `stream.sh`, `audio.sh` and `topics.sh`). The transcription stays cached |
 | `-v` | – | no | Verbose. Enables `set -x` and passes `-v` on to every step |
 
-If both `-l` and `-y` are given, `-l` wins.
+Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combined with `-e`, `-n`, `-l` or `-y`, and `-l` with `-y`.
 
-**Sequence**
+**Sequence (`-e`)**
 
+0. `./stream.sh -e <ep> [-r] [-v]`, then:
+   - the title: `-n`, otherwise the one in `stream-<ep>.json`;
+   - the source: `-l` or `-y`, otherwise `./find-audio.sh -e <ep>`, otherwise the stream URL.
+
+   If the stream lookup fails, the run only continues when both `-n` and `-l`/`-y` were given.
 1. `./audio.sh -e <ep> -l <path> | -y <url> [-u] [-t] [-r] [-v]`
 2. `./topics.sh -e <ep> [-r] [-v]`
-3. Review of `topics-<ep>.review.txt`: `y` / `[n]` / `e`
+3. Review of `topics-<ep>.review.txt`: `y` / `[n]` / `e`. Declining exits with code 3
 4. `./format.sh <ep> [-v]`
 5. `./template-yt.sh <ep>`
 6. `./template-md.sh <ep> "<title>"`
-7. `./publish.sh <ep> [-v]`
+7. `./publish.sh <ep> [-v]`. Declining the site preview also exits with code 3
 
 `set -euo pipefail` is active, so the first failing step aborts the pipeline.
+
+**`-a`**
+
+1. Lists the unpublished episodes with `./unpublished.sh` and asks before starting:
+   - `y` runs all of them;
+   - a list of numbers (`174 175`) runs only those;
+   - anything else stops.
+2. Runs `./episode.sh -e <ep>` with the same `-u -t -r -v` for each, oldest first. Each episode has its own prompts and is published on its own.
+3. A failed episode doesn't stop the others. At the end it prints which episodes are done, which stopped at a review (exit code 3), and which failed.
+
+### 5.1.1 `stream.sh`: the episode's YouTube stream
+
+```bash
+./stream.sh -e <episode> [-r] [-v]
+```
+
+It lists the latest `$STREAM_SEARCH_DEPTH` streams of `$YOUTUBE_CHANNEL_STREAMS` with `yt-dlp --flat-playlist`, a quick listing that needs no API key. It then picks the stream whose title has the episode number after "live", case-insensitive, so it matches "Live 173: …" and "LIVE DE URGENȚĂ 174: …". The vertical copy, whose title ends in "📱", is skipped.
+
+- **Output:** `stream-<ep>.json` `{id, url, title, duration, episode}`. It's reused on later runs; `-r` looks the stream up again.
+- **Cache:** the channel listing is kept in `$COWSAY_DIR/.streams.json` for 10 minutes, so `-a` lists the channel only once. The helpers are in `youtube.sh`.
+- **No match:** it fails with a hint to use `-n` and `-l`/`-y`.
+
+### 5.1.2 `find-audio.sh`: the recording on disk
+
+```bash
+./find-audio.sh -e <episode> [-v]
+```
+
+Prints the recording's path, or nothing if there is none, in which case it's downloaded from the stream. Messages go to stderr. The search order:
+
+1. `raw<ep>.mp3` from an earlier run.
+2. Any other audio or video file in the episode folder (generated files excluded).
+3. `$AUDIO_SEARCH_DIRS` (`~/Downloads`). A file matches if its name either:
+   - equals the stream title, ignoring case and punctuation (YouTube Studio replaces `:` and `?` with `_`), or
+   - contains "live <ep>".
+
+Audio files come before video files, then newest first. In steps 2 and 3, a file must last as long as the stream within `$AUDIO_DURATION_TOLERANCE` seconds; otherwise it's skipped with a note. A video (`Live 168.mp4`) is fine, because `audio.sh` extracts the audio.
+
+### 5.1.3 `unpublished.sh`: episodes not on the site yet
+
+```bash
+./unpublished.sh [-v]
+```
+
+Prints, one per line and oldest first, the episodes streamed on YouTube that aren't in the site feed (`$SITE_FEED_URL`). It reads the published numbers from the feed's post links (`/2026/09/08/173.html`).
+
+The feed only holds the latest 20 episodes, so only streams newer than the oldest one in it are considered. Episodes streamed but never published inside that window also show up; for example, 156, 157, 160, 161 and 167 at the time of writing. Answer with only the numbers you want at the `-a` prompt.
 
 ---
 
@@ -268,7 +333,7 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 | Flag | Argument | Required | Description |
 |------|----------|----------|-------------|
 | `-e` | `<number>` | yes | Episode number |
-| `-l` | `<path>` | one of `-l`/`-y` | Local source recording. It is copied, not moved |
+| `-l` | `<path>` | one of `-l`/`-y` | Local source recording, audio or video. An mp3 is copied, not moved; anything else is converted to mp3, keeping only the audio |
 | `-y` | `<url>` | one of `-l`/`-y` | YouTube URL to download |
 | `-u` | – | no | Upload the final mp3 to R2 |
 | `-t` | – | no | Test run. Fast stream-copy crop, no compression, no cleanup |
@@ -298,7 +363,7 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 | 5 | `shift_to_podcast_timeline` | Shifts the transcript by `−cut` and renders the text version | `jq` (`transcript.sh`) |
 | 6 | `preview` | Prints the cut and its evidence and plays the crop in Quick Look. `y` continues; a number re-crops at that offset (method `manual`); anything else cleans up and exits | `qlmanage -p` |
 | 7 | `add_compression` | Dynamic-range compression. Skipped in test mode | `ffmpeg -af acompressor` |
-| 8 | `add_metadata` | Embeds the cover and tags: title `Live <ep>`, artist `Cowsay Show`, genre `Podcast`, year | `ffmpeg -map 0 -map 1 -metadata … -c copy` |
+| 8 | `add_metadata` | Embeds the cover and tags: title from `stream-<ep>.json` (else `Live <ep>`), artist `Cowsay Show`, genre `Podcast`, year | `ffmpeg -map 0 -map 1 -metadata … -c copy` |
 | 9 | `r2_upload` | Only with `-u`. Picks the file name (`cow<ep>.mp3`, or `cow<ep>-rev<n>.mp3` for a fix; skips the upload if the same audio is already there), uploads it, checks that the public URL answers HTTP 200, logs it in `r2-uploads.log`, and patches the existing post if there is one. See 2.4 | `rclone copyto`, `curl -I` |
 | 10 | `clean` | Deletes the cropped and compressed files. Skipped in test mode | `rm -f` |
 
@@ -463,8 +528,10 @@ An existing `Records-<ep>.csv`, for example a manual export, is kept unless `-r`
 **Usage**
 
 ```bash
-./template-md.sh <episode_number> "<episode_title>"
+./template-md.sh <episode_number> ["<episode_title>"]
 ```
+
+The title is optional; without it, the title in `stream-<ep>.json` is used.
 
 - **Inputs:** `cow<ep>.mp3`, `topics-<ep>.md`, `chapters-<ep>.yml` (optional) and `r2-uploads.log` (the uploaded file name).
 - **Output:** `YYYY-MM-DD-<ep>.md`, copied to `$COWSAY_SOURCE`. It contains:
@@ -527,6 +594,7 @@ All files below are in `$COWSAY_DIR/<ep>/`, except the post copy, which goes to 
 | File | Produced by | Consumed by |
 |------|-------------|-------------|
 | `trello_cards_<ep>.ssv` | `trello.sh` | `topics.sh` |
+| `stream-<ep>.json` | `stream.sh` | `episode.sh`, `find-audio.sh`, `audio.sh` (ID3 title), `template-md.sh` |
 | `raw<ep>.mp3` | `audio.sh` | `transcribe.sh`, `detect-cut.sh`, `audio.sh` |
 | `transcript-<ep>.raw.json` (+ `.md5`, `.provider.json`) | `transcribe.sh` | `detect-cut.sh`, `audio.sh` |
 | `cut-<ep>.txt`, `cut-<ep>.info` | `detect-cut.sh` / preview override | `audio.sh`, `format.sh` |

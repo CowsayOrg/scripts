@@ -31,3 +31,10 @@ CUT_DEFAULT=10           # fallback offset when nothing is detected
 
 # Transcript granularity for the LLM: one [HH:MM:SS] line per this many seconds
 TRANSCRIPT_BLOCK=10
+
+# Episode lookup: title and stream from YouTube, audio from disk (stream.sh, find-audio.sh, unpublished.sh)
+YOUTUBE_CHANNEL_STREAMS="https://www.youtube.com/@cowsay/streams"
+STREAM_SEARCH_DEPTH=150        # latest streams to look at (two per episode: normal and vertical 📱)
+AUDIO_SEARCH_DIRS=("$HOME/Downloads")
+AUDIO_DURATION_TOLERANCE=30    # seconds a found file may differ from the stream duration
+SITE_FEED_URL="https://cowsay.show/episodes.mp3.rss"

@@ -81,12 +81,12 @@ read ANSWER
 
 if [ -z "$ANSWER" ]; then
     print_error "Not using this variant, please run the script again"
-    exit 0
+    exit 3    # declined, see REVIEW_DECLINED in episode.sh
 elif [ "$ANSWER" = "y" ]; then
     bundle exec octopod b > "$LOG" 2>&1
 else
     print_error "Not using this variant, please run the script again"
-    exit 0
+    exit 3
 fi
 
 # Deploy: push the built site to GitHub, Cloudflare Pages picks it up from there

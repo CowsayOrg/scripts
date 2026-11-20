@@ -48,8 +48,10 @@ Because of the bucket's object lock, a fixed audio for an episode is uploaded as
 2. Run the show. Nothing to record by hand anymore. Optionally say "cut" on air right before the greeting, it makes the intro detection exact.
 3. Use episode.sh to do the rest: transcribe the recording, detect the intro cut, crop/compress/tag the audio, upload it, place the Trello topics on the timeline, generate the show notes and chapters, publish. Follow the messages in the console, it asks you to confirm the audio cut, the topics and the site.
 ```bash
-./episode.sh -e 666 -n "Live 666: April's dry run" -l "/Users/user/Downloads/666.mp3" -u
+./episode.sh -e 666 -u     # one episode
+./episode.sh -a -u         # every episode streamed on YouTube but not published on cowsay.show yet
 ```
+The title comes from the YouTube stream. The recording is found in the episode folder or in ~/Downloads (as YouTube Studio names it), or downloaded from YouTube.
 
 The transcription (ElevenLabs) is the only paid step. It's cached per audio file, so re-running never pays twice for the same recording.
 
@@ -60,10 +62,11 @@ There is an implicit logging system that will safe everything into .logs dir. Ca
 See WORKFLOW.md for the full description of every step, file and flag.
 
 List of available options for episode.sh:
-  * -e <number>, episode number (mandatory)
-  * -n <text>, episode title (mandatory)
-  * -l <path>, local mp3 source file to use (this or -y mandatory)
-  * -y <url>, youtube episode url in case it's used as a source (this or -l mandatory)
+  * -e <number>, episode number (this or -a mandatory)
+  * -a, publish every unpublished episode (this or -e mandatory)
+  * -n <text>, override the episode title (default: the YouTube stream title)
+  * -l <path>, override the source recording, audio or video (default: found on disk)
+  * -y <url>, download the audio from this url instead
   * -u, upload to R2
   * -t, test run: fast crop, no compression, no cleanup. For script testing purposes.
   * -r, rebuild files if this is not the first run for this episode (the transcription stays cached).
