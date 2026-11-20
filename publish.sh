@@ -21,7 +21,8 @@
 . ./vars.sh
 
 set -euo pipefail
-set -m
+# No "set -m": with job control on, a publish.sh started from episode.sh is not in the terminal's
+# foreground, and macOS stops it (SIGTTIN) as soon as it reads the answer.
 
 if [ "${2:-}" = "-v" ]; then
     set -x
@@ -67,17 +68,24 @@ print_message "Launching the server... openning the page"
 
 bundle exec octopod s > "$LOG" 2>&1 &
 PID=$!
+trap 'kill $PID 2> /dev/null || true' EXIT    # the preview server stops when the script ends, however it ends
+WAITED=0
 until grep -q "Server address: "$LOCAL_ADDRESS"" "$LOG"; do
+    if ! kill -0 $PID 2> /dev/null || (( WAITED >= 120 )); then
+        print_error "The preview server didn't start, see $LOG"
+        exit 1
+    fi
     sleep 1
+    WAITED=$(( WAITED + 1 ))
 done
 open "$LOCAL_ADDRESS"
-sleep 1
-kill $PID
 
 # Ask user to deploy this variant
 
 print_message "Do you want to proceed with this variant? y/[n]"
 read ANSWER
+kill $PID 2> /dev/null || true    # stop the preview server before the production build
+wait $PID 2> /dev/null || true
 
 if [ -z "$ANSWER" ]; then
     print_error "Not using this variant, please run the script again"
