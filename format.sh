@@ -136,8 +136,17 @@ do
         echo "$VIDEO_TIME - $col2"  >> "$YOUTUBE_TOPICS_FILE"
         echo "* $col2"  >> "$EPISODE_TOPICS_FILE"
     else
-        echo "$VIDEO_TIME - $col2: $col3"  >> "$YOUTUBE_TOPICS_FILE"
-        echo "* [$col2]($col3)"  >> "$EPISODE_TOPICS_FILE"
+        # Links are separated by spaces: one link makes the whole title a link, several are listed
+        LINKS=(${=col3})
+        if [ ${#LINKS} -eq 1 ]; then
+            echo "$VIDEO_TIME - $col2: ${LINKS[1]}"  >> "$YOUTUBE_TOPICS_FILE"
+            echo "* [$col2](${LINKS[1]})"  >> "$EPISODE_TOPICS_FILE"
+        else
+            MD_LINKS=()
+            for i in {1..${#LINKS}}; do MD_LINKS+=("[link$i](${LINKS[$i]})"); done
+            echo "$VIDEO_TIME - $col2: ${(j:, :)LINKS}"  >> "$YOUTUBE_TOPICS_FILE"
+            echo "* $col2 (${(j:, :)MD_LINKS})"  >> "$EPISODE_TOPICS_FILE"
+        fi
     fi
 done <  "$INTERMEDIETE_FILE"
 

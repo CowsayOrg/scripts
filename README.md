@@ -41,10 +41,7 @@ Because of the bucket's object lock, a fixed audio for an episode is uploaded as
 ```
 
 ## How to use the scripts
-1. Before running the show use trello.sh to download the topics.
-```bash
-./trello.sh '11 April' 666
-```
+1. Before the show, put the topics as cards in the show's Trello list (named after the date, e.g. "Nov 20"), with links as attachments or in the description. The scripts find the list by the stream date and take the links from it (trello.sh).
 2. Run the show. Nothing to record by hand anymore. Optionally say "cut" on air right before the greeting, it makes the intro detection exact.
 3. Use episode.sh to do the rest: transcribe the recording, detect the intro cut, crop/compress/tag the audio, upload it, place the Trello topics on the timeline, generate the show notes and chapters, publish. Follow the messages in the console, it asks you to confirm the audio cut, the topics and the site.
 ```bash

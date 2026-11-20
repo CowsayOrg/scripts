@@ -146,7 +146,10 @@ else
     ./audio.sh -e "$EPISODE_NUMBER" -y "$YOUTUBE_URL" "${AUDIO_FLAGS[@]}" "${COMMON_FLAGS[@]}"
 fi
 
-# 2. Topics: transcript + Trello list -> Records-<ep>.csv
+# 2. Topics: transcript + Trello cards and their links -> Records-<ep>.csv
+if ! ./trello.sh -e "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"; then
+    print_error "No Trello topics for episode $EPISODE_NUMBER, the topics will have no links (run ./trello.sh -e $EPISODE_NUMBER -l \"<list name>\" and then this again with -r)"
+fi
 ./topics.sh -e "$EPISODE_NUMBER" "${COMMON_FLAGS[@]}"
 
 # 3. Review the topics before they go into the show notes

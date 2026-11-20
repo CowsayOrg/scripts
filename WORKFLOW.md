@@ -13,7 +13,7 @@ There is no manual step during the show anymore. After the show, the raw recordi
 ```
  BEFORE THE SHOW                         AFTER THE SHOW (episode.sh)
  ───────────────                         ───────────────────────────
- trello.sh ──► trello_cards_<ep>.ssv ─┐
+ trello.sh ──► trello-<ep>.json ──────┐
                                       │   audio.sh
  stream.sh (YouTube title, url) ──────┤
  find-audio.sh (disk) or the stream ──┼─►  raw ─► transcribe.sh ─► detect-cut.sh ─► crop ─► shift transcript
@@ -118,6 +118,8 @@ ELEVENLABS_API_KEY="sk_..."    # ElevenLabs speech-to-text
 | `YT_BASE_TAGS` | Tags every episode gets, before the topic titles |
 | `YT_CAPTION_NAME` | Name of our caption track, so reruns find it |
 | `YT_ALIGN_MIN_MATCHES` | Words `yt-align.sh` needs to trust a measured offset (`30`) |
+| `TRELLO_BOARD_ID` | The Trello board with the show lists (`KOfBQFVg`) |
+| `TRELLO_LINK_EXCLUDE` | Regexes of links never published (Google Docs/Drive, `chatgpt.site`, Trello uploads) |
 | `SHOW_TIMEZONE` | Time zone of the show (`Europe/Chisinau`). The post date is the stream's date there |
 | `SITE_FEED_URL` | The site's podcast feed, the list of published episodes (`https://cowsay.show/episodes.mp3.rss`) |
 
@@ -211,13 +213,9 @@ These files are sourced, not executed.
 
 ## 4. Step-by-step workflow
 
-### Step 1: Fetch topics from Trello (before the show)
+### Step 1: Prepare the topics in Trello (before the show)
 
-```bash
-./trello.sh '<List Name>' <episode_number>
-# e.g.
-./trello.sh '11 April' 666
-```
+Put the topics as cards in the show's list, named after the show date ("Nov 20"), with their links as attachments or in the description. `episode.sh` fetches them after the show by itself (`trello.sh`), so there's nothing to run beforehand.
 
 ### Step 2: Run the show
 
@@ -480,23 +478,30 @@ An existing `Records-<ep>.csv`, for example a manual export, is kept unless `-r`
 **Inputs:**
 
 - `transcript-<ep>.txt` and `transcript-<ep>.json` (podcast timeline);
-- `trello_cards_<ep>.ssv` (optional). Without it, Claude discovers the topics itself, without links.
+- `trello-<ep>.json` from `trello.sh` (optional; the old `trello_cards_<ep>.ssv` is read too). Without it, Claude discovers the topics itself, and they have no links.
 
 **Sequence**
 
-1. Parses the Trello cards into `[{title, link}]` (the first attachment URL is the link).
+1. Numbers the Trello cards and gives Claude each card's name and the start of its description. The links are not sent.
 2. Fills `prompts/topics.md` and calls `claude -p --model $LLM_MODEL --tools "" --output-format json --json-schema prompts/topics.schema.json`.
-3. Claude returns, for every topic, its start, whether it was planned or skipped, and a short verbatim evidence quote, plus the outro start. Unplanned substantial topics are added.
-4. Validates the result: every discussed topic has a start, and all times fall inside the audio.
+3. Claude returns, for every discussed topic:
+   - its start;
+   - its own **title**, a short Romanian headline of 3 to 8 words saying what was actually discussed;
+   - the **card** it covers, or none;
+   - a short verbatim evidence quote.
+
+   It also returns the cards that weren't discussed, and the outro start. One card can be two topics, and substantial topics without a card are included.
+4. Validates the result: every time falls inside the audio, and every card number exists.
 5. **Refines** each start: it looks for the evidence quote in the segment-level transcript within that line's block and uses the segment's exact start, with milliseconds.
-6. Writes the outputs.
+6. **Links:** each topic gets its card's links, copied from `trello-<ep>.json`, so Claude never types a URL.
+7. Writes the outputs.
 
 **Outputs**
 
 | File | Content |
 |------|---------|
-| `Records-<ep>.csv` | Same format as the old Records app export: `"HH:MM:SS.mmm","Title"[,"link"]`, with Intro at `00:00:00.000` first, topics in time order and Outro last. Skipped topics are left out |
-| `topics-<ep>.review.txt` | Readable summary for the review step |
+| `Records-<ep>.csv` | Same format as the old Records app export: `"HH:MM:SS.mmm","Title"[,"link1 link2 …"]` (links separated by spaces), with Intro at `00:00:00.000` first, topics in time order and Outro last |
+| `topics-<ep>.review.txt` | Readable summary for the review step: each topic with its card and number of links, and the cards not discussed |
 | `topics-<ep>.llm.json`, `topics-<ep>.timed.json` | Claude's raw answer and the refined times |
 
 ---
@@ -643,15 +648,25 @@ Writing to YouTube needs OAuth; an API key can only read.
 
 The scripts then refresh the access token by themselves, with no browser (`yt-api.sh`). If it ever stops working, run `./youtube-auth.sh` again.
 
-### 5.11 `trello.sh`: topic export
-
-**Usage**
+### 5.11 `trello.sh`: Trello topics and their links
 
 ```bash
-./trello.sh '<List Name>' <episode_number>
+./trello.sh -e <episode> [-l "<list name>"] [-v]
+./trello.sh "<list name>" <episode>      # old form, still works (Raycast)
 ```
 
-It finds the list on board `KOfBQFVg` by name, fetches its cards and their attachment URLs, and writes `trello_cards_<ep>.ssv` with lines of the form `<card name>†<url1;url2;…>`. Auth comes from `API_KEY` and `TOKEN` in `secrets.sh`.
+The board (`$TRELLO_BOARD_ID`) has one list per show, named after the show date in various forms ("Nov 20", "28 July", "16th of September", "8 окт").
+- **Finding the list:** without `-l`, it matches the day and month in each list's name, including archived lists, against the stream date from `stream-<ep>.json`. If it has no date yet, it runs `stream.sh`. If several lists match, it takes the one created last before the stream; the creation time is encoded in the Trello id. Months can be written in English, Romanian or Russian.
+- **Links of a card:** its attachments, then the URLs in its description.
+  - Tracking parameters (`utm_*`, `fbclid`, `gclid`) are removed, then duplicates.
+  - Links matching `$TRELLO_LINK_EXCLUDE` are dropped. These are private prep notes that must not end up in a public description: Google Docs and Drive, `chatgpt.site` pages, and uploaded files.
+- **Output:** `trello-<ep>.json`: `{list: {id, name}, cards: [{name, links, desc}]}`. Auth comes from `API_KEY` and `TOKEN` in `secrets.sh`.
+
+`episode.sh` runs it before `topics.sh`. If it finds no list, the run continues without links.
+
+**How links are shown** (`format.sh`):
+- with one link, the whole title is the link: `* [Title](url)` on the site, `Title: url` on YouTube;
+- with several, they're listed: `* Title ([link1](url1), [link2](url2))` on the site, `Title: url1, url2` on YouTube.
 
 ### 5.12 `.mcp.json` and `trello-mcp.sh`
 
@@ -673,7 +688,7 @@ All files below are in `$COWSAY_DIR/<ep>/`, except the post copy, which goes to 
 
 | File | Produced by | Consumed by |
 |------|-------------|-------------|
-| `trello_cards_<ep>.ssv` | `trello.sh` | `topics.sh` |
+| `trello-<ep>.json` (old: `trello_cards_<ep>.ssv`) | `trello.sh` | `topics.sh` |
 | `youtube-offset-<ep>.txt`, `.info`, `youtube-autosubs-<ep>.*.json3` | `yt-align.sh` | `format.sh`, `youtube-update.sh` |
 | `youtube-captions-<ep>.srt` | `youtube-update.sh` | YouTube |
 | `stream-<ep>.json` | `stream.sh` | `episode.sh`, `find-audio.sh`, `audio.sh` (ID3 title), `template-md.sh` |
