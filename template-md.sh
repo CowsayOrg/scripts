@@ -47,6 +47,12 @@ STREAM_FILE="$COWSAY_DIR/$1/stream-$1.json"
 if [ -z "$EPISODE_TITLE" ] && [ -s "$STREAM_FILE" ]; then
     EPISODE_TITLE=$(jq -r '.title' "$STREAM_FILE")
 fi
+VIDEO_LINE=""
+if [ -s "$STREAM_FILE" ]; then
+    VIDEO_LINE="
+Urmăriți episodul pe [YouTube]($(jq -r '.url' "$STREAM_FILE"))
+"
+fi
 if [ -z "$EPISODE_TITLE" ]; then
     print_error "This script needs episode title in order to work (or run ./stream.sh -e $1 first)"
     exit 1
@@ -126,7 +132,7 @@ $CHAPTERS
 ---
 
 {% podigee_player page %}
-
+$VIDEO_LINE
 ### Live-ul săptămânal Cowsay Show. Vă aducem o doză [ne]sănătoasă de speculații 🤗. 
 
 Ne găsiți pe [Discord](https://discord.gg/UaNer3K), [Facebook](https://www.facebook.com/cowsayshow), [Youtube](https://youtube.com/@cowsay).<br>

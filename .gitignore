@@ -1,3 +1,5 @@
 secrets.sh
 .logs
 .DS_Store
+youtube-client.json
+youtube-token.json

@@ -170,8 +170,14 @@ elif [ "$ANSWER" != "y" ]; then
     exit $REVIEW_DECLINED
 fi
 
-# 4. Show notes, chapters, post, publish
+# 4. Where the YouTube video starts against the raw audio, for its timestamps and captions
+./yt-align.sh -e "$EPISODE_NUMBER" "${COMMON_FLAGS[@]}"
+
+# 5. Show notes, chapters, post, publish
 ./format.sh "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"
 ./template-yt.sh "$EPISODE_NUMBER"
 ./template-md.sh "$EPISODE_NUMBER" "$EPISODE_TITLE"
 ./publish.sh "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"
+
+# 6. YouTube: description, tags, category, playlist, captions (skipped until youtube-auth.sh was run)
+./youtube-update.sh -e "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"

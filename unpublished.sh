@@ -7,14 +7,14 @@
 # Published: the episode numbers in the site feed ($SITE_FEED_URL), from the item links
 # (https://cowsay.show/2026/09/08/173.html -> 173). The feed only has the latest episodes, so it is
 # a window: only streams newer than its oldest episode are considered.
-# Streamed: normal (not 📱) streams whose title has the number after "live" (see youtube.sh).
+# Streamed: normal (not 📱) streams whose title has the number after "live" (see yt-helpers.sh).
 
 SCRIPTS_DIR="${0:A:h}"
 cd "$SCRIPTS_DIR"
 
 . ./messages.sh
 . ./vars.sh
-. ./youtube.sh
+. ./yt-helpers.sh
 
 set -euo pipefail
 

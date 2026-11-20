@@ -9,3 +9,5 @@ bundler
 jekyll
 octopod
 jq
+python3
+openssl

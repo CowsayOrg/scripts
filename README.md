@@ -55,6 +55,15 @@ The title comes from the YouTube stream. The recording is found in the episode f
 
 The transcription (ElevenLabs) is the only paid step. It's cached per audio file, so re-running never pays twice for the same recording.
 
+## YouTube
+After publishing, `youtube-update.sh` sets the episode's YouTube description (with chapters and the link to the post), tags, category and language, adds it to the "Lives" playlist, and uploads our transcript as captions. It shows a diff and asks first. It needs a one-time Google setup, described in WORKFLOW.md under "YouTube API setup". Until then the step is skipped.
+```bash
+./youtube-update.sh -e 666 -n   # dry run
+./youtube-backfill.sh -n        # episodes missing from the Lives playlist
+```
+
+Ideas that were proposed but not built yet are in FUTURE.md.
+
 ## Logs
 There is an implicit logging system that will safe everything into .logs dir. Cannot be turned or customized for the moment.
 

@@ -4,7 +4,7 @@
 #
 # Usage: ./stream.sh -e <episode> [-r] [-v]
 #
-# Output: $COWSAY_DIR/<ep>/stream-<ep>.json  {id, url, title, duration, episode}
+# Output: $COWSAY_DIR/<ep>/stream-<ep>.json  {id, url, title, duration, episode, vertical_id?}
 # An existing stream-<ep>.json is reused unless -r is given (for example after the title was
 # edited on YouTube).
 
@@ -15,7 +15,7 @@ cd "$SCRIPTS_DIR"
 . ./logging.sh
 . ./vars.sh
 . ./utils.sh
-. ./youtube.sh
+. ./yt-helpers.sh
 
 set -euo pipefail
 
@@ -46,7 +46,11 @@ if [ -s "$OUTPUT" ] && [ "$REWRITE" = false ]; then
     exit 0
 fi
 
-STREAM=$(streams_json "$REWRITE" | jq --argjson ep "$EPISODE_NUMBER" '[ .[] | select(.episode == $ep) ] | first // empty')
+# The normal stream, plus the id of its vertical copy (title ending in 📱) when there is one
+STREAM=$(streams_json "$REWRITE" | jq --argjson ep "$EPISODE_NUMBER" '
+    ([ .[] | select(.vertical and .number == $ep) ] | first) as $v
+    | [ .[] | select(.episode == $ep) ] | first // empty
+    | { id, url, title, duration, episode } + (if $v then { vertical_id: $v.id } else {} end)')
 
 if [ -z "$STREAM" ]; then
     print_error "No stream for episode $EPISODE_NUMBER in the latest $STREAM_SEARCH_DEPTH streams of $YOUTUBE_CHANNEL_STREAMS"

@@ -76,16 +76,29 @@ csvformat -D "¬" "$INPUT_FILE" > "$INTERMEDIETE_FILE" 2>> "$LOG"
 rm -f "$YOUTUBE_TOPICS_FILE" "$EPISODE_TOPICS_FILE" "$CHAPTERS_FILE"
 touch "$YOUTUBE_TOPICS_FILE" "$EPISODE_TOPICS_FILE" "$CHAPTERS_FILE"
 
-# The YouTube video still has the pre-show, so its timestamps are shifted by the crop offset
-OFFSET=0
+# YouTube time = podcast time + cut - YouTube offset (yt-align.sh: how much of the raw audio's start
+# the video doesn't have). Without an offset file the video is assumed to start with the raw audio.
+CUT=0
+LEGACY_CUT=false
 if [ -f "$CUT_FILE" ]; then
     CUT_VALUE=$(< "$CUT_FILE")
-    if [[ "$CUT_VALUE" == *:* ]]; then
-        OFFSET=0    # old manual cut files (HH:MM:SS) were never applied to the Records times
+    if [[ "$CUT_VALUE" == *:* ]]; then    # old manual cut files (HH:MM:SS)
+        IFS=: read -r h m sec <<< "$CUT_VALUE"
+        CUT=$(( 10#$h * 3600 + 10#$m * 60 + 10#${sec%.*} ))
+        LEGACY_CUT=true
     else
-        OFFSET=${CUT_VALUE%.*}
+        CUT=$CUT_VALUE
     fi
 fi
+YT_OFFSET_FILE="youtube-offset-$1.txt"
+if [ -f "$YT_OFFSET_FILE" ]; then
+    YT_OFFSET=$(< "$YT_OFFSET_FILE")
+elif [ "$LEGACY_CUT" = true ]; then
+    YT_OFFSET=$CUT    # the old flow never shifted the YouTube times
+else
+    YT_OFFSET=0
+fi
+typeset -i OFFSET=$(printf "%.0f" $(( CUT - YT_OFFSET )))    # typeset -i turns "-0" into 0
 
 # to_seconds HH:MM:SS -> seconds
 to_seconds() {
@@ -110,7 +123,11 @@ do
         continue
     fi
 
-    VIDEO_TIME=$(to_hms $(( $(to_seconds "$TIME") + OFFSET )))
+    VIDEO_SECONDS=$(( $(to_seconds "$TIME") + OFFSET ))
+    if [ "$col2" = "Intro" ] || (( VIDEO_SECONDS < 0 )); then
+        VIDEO_SECONDS=0    # YouTube chapters need the first timestamp at 00:00:00
+    fi
+    VIDEO_TIME=$(to_hms $VIDEO_SECONDS)
     echo "  - '$col1 ${col2//$SQ/$SQ$SQ}'" >> "$CHAPTERS_FILE"
 
     if [ "$col2" = "Intro" ] || [ "$col2" = "Outro" ]; then
@@ -130,7 +147,7 @@ rm -f "$INTERMEDIETE_FILE"
 sort -o "$CHAPTERS_FILE" "$CHAPTERS_FILE"
 
 if [ "$OFFSET" != "0" ]; then
-    print_message "YouTube timestamps shifted by $OFFSET s to match the uncut video"
+    print_message "YouTube timestamps shifted by $OFFSET s (cut $CUT s, the video starts $YT_OFFSET s into the raw audio)"
 fi
 
 print_success "The show notes and chapters have been formatted 🐮"

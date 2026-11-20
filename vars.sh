@@ -38,3 +38,13 @@ STREAM_SEARCH_DEPTH=150        # latest streams to look at (two per episode: nor
 AUDIO_SEARCH_DIRS=("$HOME/Downloads")
 AUDIO_DURATION_TOLERANCE=30    # seconds a found file may differ from the stream duration
 SITE_FEED_URL="https://cowsay.show/episodes.mp3.rss"
+
+# YouTube Data API (youtube-auth.sh, youtube-update.sh, youtube-backfill.sh)
+YT_CLIENT_FILE="${0:A:h}/youtube-client.json"   # OAuth "Desktop app" client from Google Cloud (gitignored)
+YT_TOKEN_FILE="${0:A:h}/youtube-token.json"     # refresh token written by youtube-auth.sh (gitignored)
+YT_LIVES_PLAYLIST="PL7YHNlkQJFSdJTB9fZ_DbLsUp44vxqVKr"   # "Lives"
+YT_CATEGORY_ID=28                               # Science & Technology
+YT_LANGUAGE="ro"
+YT_BASE_TAGS=("cowsay" "cowsay show" "podcast" "tech" "știri tech" "AI" "live")
+YT_CAPTION_NAME="Transcript Cowsay"             # our caption track, so reruns can find it
+YT_ALIGN_MIN_MATCHES=30                         # yt-align.sh: words needed to trust the measured offset

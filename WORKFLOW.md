@@ -26,23 +26,29 @@ There is no manual step during the show anymore. After the show, the raw recordi
                                           topics-<ep>.md  (website)
                                           chapters-<ep>.yml
                                               │
+                                          yt-align.sh    ─► youtube-offset-<ep>.txt (video vs raw)
                                           template-yt.sh ─► youtube-<ep>.txt → clipboard
-                                          template-md.sh ─► post with chapters → _posts/
+                                          template-md.sh ─► post with chapters + video link → _posts/
                                           publish.sh     ─► preview, build, push _site → Cloudflare Pages
+                                          youtube-update.sh ─► description, tags, category,
+                                                               Lives playlist, captions → YouTube
 ```
 
 All per-episode working files are kept in `$COWSAY_DIR/<episode_number>/`.
 
 Only the episode number is needed: the title comes from the episode's YouTube stream, and the recording is found on disk or downloaded from the stream. `episode.sh -a` runs every episode that is on YouTube but not on cowsay.show yet.
 
-### Two timelines
+### Three timelines
 
 | Timeline | Starts at | Used for |
 |----------|-----------|----------|
-| **Video** (raw) | start of the live-stream recording, pre-show included | `transcript-<ep>.raw.json`, cut detection, YouTube description |
+| **Raw** | start of `raw<ep>.mp3`, pre-show included | `transcript-<ep>.raw.json`, cut detection |
 | **Podcast** | the intro cut | the published mp3, `transcript-<ep>.json/.txt`, `Records-<ep>.csv`, website chapters |
+| **YouTube** | start of the YouTube video | description timestamps, captions |
 
-The crop is a plain cut at an offset (`ffmpeg -ss <cut>`), so podcast time = video time − cut. The cut offset is stored in `cut-<ep>.txt` in seconds. `format.sh` adds it back for the YouTube timestamps.
+- **Podcast time = raw time − cut.** The crop is a plain cut at an offset (`ffmpeg -ss <cut>`), stored in `cut-<ep>.txt` in seconds.
+- **YouTube time = raw time − YouTube offset.** The YouTube video doesn't always start where the raw audio does. When the raw audio is YouTube's own download (the file in `~/Downloads`), they match. A local recording can have minutes of pre-show that the video doesn't: for episode 142 it was 171.2 s, almost exactly its intro cut.
+- `yt-align.sh` measures the offset per episode into `youtube-offset-<ep>.txt`, and `format.sh` uses podcast time + cut − YouTube offset for the description.
 
 ---
 
@@ -59,6 +65,7 @@ The crop is a plain cut at an offset (`ffmpeg -ss <cut>`), so podcast time = vid
 | `rclone`    | `audio.sh` | upload the final mp3 to Cloudflare R2 |
 | `csvformat` | `format.sh` | change the delimiter of the Records CSV (part of csvkit) |
 | `jq`        | most scripts | JSON processing |
+| `python3`, `openssl` | `youtube-auth.sh` | the one-time YouTube login (local redirect listener, PKCE); both ship with macOS |
 | `git`       | `publish.sh` | commit and push the built site and the site sources |
 | `bundler`, `jekyll`, `octopod` | `publish.sh` | serve and build the podcast site |
 
@@ -104,6 +111,13 @@ ELEVENLABS_API_KEY="sk_..."    # ElevenLabs speech-to-text
 | `STREAM_SEARCH_DEPTH` | How many of the latest streams are listed (`150`, two per episode) |
 | `AUDIO_SEARCH_DIRS` | Where `find-audio.sh` looks for recordings besides the episode folder (`~/Downloads`) |
 | `AUDIO_DURATION_TOLERANCE` | Seconds a found recording may differ from the stream duration (`30`) |
+| `YT_CLIENT_FILE`, `YT_TOKEN_FILE` | OAuth client and token for the YouTube API (`youtube-client.json`, `youtube-token.json`, gitignored) |
+| `YT_LIVES_PLAYLIST` | The "Lives" playlist id |
+| `YT_CATEGORY_ID` | YouTube category (`28`, Science & Technology) |
+| `YT_LANGUAGE` | Video and caption language (`ro`) |
+| `YT_BASE_TAGS` | Tags every episode gets, before the topic titles |
+| `YT_CAPTION_NAME` | Name of our caption track, so reruns find it |
+| `YT_ALIGN_MIN_MATCHES` | Words `yt-align.sh` needs to trust a measured offset (`30`) |
 | `SITE_FEED_URL` | The site's podcast feed, the list of published episodes (`https://cowsay.show/episodes.mp3.rss`) |
 
 ### 2.4 Cloudflare R2 (audio hosting)
@@ -264,10 +278,12 @@ Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combine
 1. `./audio.sh -e <ep> -l <path> | -y <url> [-u] [-t] [-r] [-v]`
 2. `./topics.sh -e <ep> [-r] [-v]`
 3. Review of `topics-<ep>.review.txt`: `y` / `[n]` / `e`. Declining exits with code 3
-4. `./format.sh <ep> [-v]`
-5. `./template-yt.sh <ep>`
-6. `./template-md.sh <ep> "<title>"`
-7. `./publish.sh <ep> [-v]`. Declining the site preview also exits with code 3
+4. `./yt-align.sh -e <ep> [-r] [-v]`
+5. `./format.sh <ep> [-v]`
+6. `./template-yt.sh <ep>`
+7. `./template-md.sh <ep> "<title>"`
+8. `./publish.sh <ep> [-v]`. Declining the site preview also exits with code 3
+9. `./youtube-update.sh -e <ep> [-v]`. It asks before changing anything, and is skipped until the YouTube API setup is done
 
 `set -euo pipefail` is active, so the first failing step aborts the pipeline.
 
@@ -289,7 +305,7 @@ Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combine
 It lists the latest `$STREAM_SEARCH_DEPTH` streams of `$YOUTUBE_CHANNEL_STREAMS` with `yt-dlp --flat-playlist`, a quick listing that needs no API key. It then picks the stream whose title has the episode number after "live", case-insensitive, so it matches "Live 173: …" and "LIVE DE URGENȚĂ 174: …". The vertical copy, whose title ends in "📱", is skipped.
 
 - **Output:** `stream-<ep>.json` `{id, url, title, duration, episode}`. It's reused on later runs; `-r` looks the stream up again.
-- **Cache:** the channel listing is kept in `$COWSAY_DIR/.streams.json` for 10 minutes, so `-a` lists the channel only once. The helpers are in `youtube.sh`.
+- **Cache:** the channel listing is kept in `$COWSAY_DIR/.streams.json` for 10 minutes, so `-a` lists the channel only once. The helpers are in `yt-helpers.sh`; the API helpers are in `yt-api.sh`.
 - **No match:** it fails with a hint to use `-n` and `-l`/`-y`.
 
 ### 5.1.2 `find-audio.sh`: the recording on disk
@@ -491,7 +507,7 @@ An existing `Records-<ep>.csv`, for example a manual export, is kept unless `-r`
 ./format.sh <episode_number> [-v]
 ```
 
-**Input:** `Records-<ep>.csv`, made by `topics.sh` or exported by hand, plus `cut-<ep>.txt`.
+**Input:** `Records-<ep>.csv`, made by `topics.sh` or exported by hand, plus `cut-<ep>.txt` and `youtube-offset-<ep>.txt`.
 
 **Row rules**
 
@@ -506,11 +522,22 @@ An existing `Records-<ep>.csv`, for example a manual export, is kept unless `-r`
 
 | File | Content |
 |------|---------|
-| `topics-<ep>.txt` | YouTube list on the **video timeline**: Records time + the cut offset from `cut-<ep>.txt`. Old `HH:MM:SS` cut files from the manual era are not added |
+| `topics-<ep>.txt` | YouTube list on the **YouTube timeline**: Records time + cut (`cut-<ep>.txt`) − YouTube offset (`youtube-offset-<ep>.txt`, from `yt-align.sh`), rounded; Intro is always `00:00:00`, as YouTube chapters require. Without an offset file the video is assumed to start with the raw audio. Old `HH:MM:SS` cut files from the manual era are read as seconds; without an offset file they shift nothing, as before |
 | `topics-<ep>.md` | Website bullet list |
 | `chapters-<ep>.yml` | Octopod chapter lines `  - 'HH:MM:SS.mmm Title'` (podcast time, sorted; `'` doubled for YAML) |
 
 ---
+
+### 5.7.1 `yt-align.sh`: where the YouTube video starts
+
+```bash
+./yt-align.sh -e <episode> [-r] [-v]
+```
+
+It measures the YouTube offset: how many seconds into `raw<ep>.mp3` the YouTube video starts.
+- **With captions:** it downloads YouTube's automatic Romanian captions with yt-dlp (free, no login) and matches words that occur only once in both them and `transcript-<ep>.raw.json`. The offset is the median time difference. It's trusted with at least `$YT_ALIGN_MIN_MATCHES` (30) matches, 80% of them within 2 s of the median. Episode 142: 489 of 492 words, 171.239 s.
+- **Without captions:** YouTube adds them a while after the stream. It then falls back to the difference in duration, if that's over 15 s, and otherwise to 0. Run it again with `-r` once YouTube has captions.
+- **Output:** `youtube-offset-<ep>.txt` (seconds, `%.3f`) and `youtube-offset-<ep>.info` (method and evidence). It's reused unless `-r` is given.
 
 ### 5.8 `template-yt.sh`: YouTube/Facebook description
 
@@ -563,6 +590,51 @@ The Podigee player shows the chapters (Octopod reads `chapter[0..12]` as the sta
 
 `set -m` (job control) is on. `set -x` is on only with `-v`.
 
+### 5.10.1 `youtube-update.sh`: update the YouTube videos
+
+```bash
+./youtube-update.sh -e <episode> [-n] [-r] [-v]
+```
+
+It updates, through the YouTube Data API:
+
+| What | Main video | Vertical 📱 video |
+|------|------------|-------------------|
+| Description: `youtube-<ep>.txt` with `🎧 Episodul ca podcast: <post url>` on top. The timestamps make YouTube's chapters | yes | yes, with `▶️ Versiunea orizontală: <main video>` on top |
+| Tags: `$YT_BASE_TAGS`, then the topic titles without the `[Name]` prefix and without commas (a comma in a tag breaks the whole list), up to YouTube's 500 characters. Compared regardless of order, since YouTube returns them sorted | yes | yes |
+| Category `$YT_CATEGORY_ID` (28, Science & Technology), language `$YT_LANGUAGE` (ro) | yes | yes |
+| "Lives" playlist (`$YT_LIVES_PLAYLIST`), skipped if it's already there | yes | no |
+| Captions `$YT_CAPTION_NAME` from `transcript-<ep>.raw.json`, shifted to the YouTube timeline, at most about 6 s or 80 characters per cue (`youtube-captions-<ep>.srt`) | yes | no |
+
+The title is left as it is on YouTube.
+
+- **Review first:** it shows a diff between what's on YouTube and what's proposed, then asks y/[n]. Nothing is written without a `y`.
+- **Flags:** `-n` is a dry run; without the login it shows the proposed content only. `-r` replaces our caption track if it's already there. Without `-r`, an existing track is kept.
+- **Before the one-time setup:** it prints a note and exits 0, so `episode.sh` keeps working.
+- **Quota:** about 600 of the 10,000 daily units per episode: 50 per video update, 51 for the playlist, 450 for the captions.
+
+### 5.10.2 `youtube-backfill.sh`: complete the Lives playlist
+
+```bash
+./youtube-backfill.sh [-n] [-v]
+```
+
+It adds, oldest first, the episode streams newer than the newest episode already in "Lives". Older ones are left alone. It lists them and asks first; `-n` only lists them. The playlist is read with yt-dlp (free), and each insert costs 50 units. In November 2026, episodes 155 to 174 were missing: 19 videos, since 165 has no video.
+
+### 5.10.3 YouTube API setup (once)
+
+Writing to YouTube needs OAuth; an API key can only read.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), pick or create a project and enable **YouTube Data API v3** (APIs & Services → Library).
+2. Set up the **OAuth consent screen** (Google Auth Platform → Branding / Audience):
+   - type External;
+   - add your account as a test user;
+   - then **Publish app** so it's "In production". In "Testing" mode the login expires after 7 days. An unverified app is fine for your own use; Google shows a warning once at login.
+3. Under **Clients**, create an OAuth client of type **Desktop app**. Download its JSON to `youtube-client.json` in the scripts folder. It's gitignored.
+4. Run `./youtube-auth.sh`. The browser opens; sign in and **choose the Cowsay channel** if Google asks which account or brand account. The refresh token is saved to `youtube-token.json` (gitignored, mode 600), and the script prints the channel it logged in as.
+
+The scripts then refresh the access token by themselves, with no browser (`yt-api.sh`). If it ever stops working, run `./youtube-auth.sh` again.
+
 ### 5.11 `trello.sh`: topic export
 
 **Usage**
@@ -594,6 +666,8 @@ All files below are in `$COWSAY_DIR/<ep>/`, except the post copy, which goes to 
 | File | Produced by | Consumed by |
 |------|-------------|-------------|
 | `trello_cards_<ep>.ssv` | `trello.sh` | `topics.sh` |
+| `youtube-offset-<ep>.txt`, `.info`, `youtube-autosubs-<ep>.*.json3` | `yt-align.sh` | `format.sh`, `youtube-update.sh` |
+| `youtube-captions-<ep>.srt` | `youtube-update.sh` | YouTube |
 | `stream-<ep>.json` | `stream.sh` | `episode.sh`, `find-audio.sh`, `audio.sh` (ID3 title), `template-md.sh` |
 | `raw<ep>.mp3` | `audio.sh` | `transcribe.sh`, `detect-cut.sh`, `audio.sh` |
 | `transcript-<ep>.raw.json` (+ `.md5`, `.provider.json`) | `transcribe.sh` | `detect-cut.sh`, `audio.sh` |
