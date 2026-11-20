@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "trello": {
+      "type": "stdio",
+      "command": "/Users/user/Code/Cowsay/cowsay-scripts/trello-mcp.sh",
+      "args": []
+    }
+  }
+}

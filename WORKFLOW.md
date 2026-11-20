@@ -506,9 +506,11 @@ The Podigee player shows the chapters (Octopod reads `chapter[0..12]` as the sta
 
 It finds the list on board `KOfBQFVg` by name, fetches its cards and their attachment URLs, and writes `trello_cards_<ep>.ssv` with lines of the form `<card name>†<url1;url2;…>`. Auth comes from `API_KEY` and `TOKEN` in `secrets.sh`.
 
-### 5.12 `trello-mcp.json`
+### 5.12 `.mcp.json` and `trello-mcp.sh`
 
-An MCP server configuration for a local `mcp-server-trello` build on the same board. It is not used by the shell scripts.
+Claude Code's project MCP config. It loads the Trello MCP server (a local `mcp-server-trello` build, board `KOfBQFVg`) when Claude Code runs in this directory. The shell scripts don't use it.
+
+`.mcp.json` holds no credentials: it starts `trello-mcp.sh`, which reads `TRELLO_MCP_API_KEY` and `TRELLO_MCP_TOKEN` from `secrets.sh` and runs the server with them.
 
 ---
 
