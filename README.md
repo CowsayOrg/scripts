@@ -2,42 +2,71 @@
 1. Check for requirements.txt and install missing utils.
 2. Check for cowsay site source dir.
 3. This script runs only on macOS because relies on some OS specific tools (pbcopy, qlmanage etc.)
-4. Create secrect.sh file with two vars: API_KEY and TOKEN. Those are trello credentials to run trello.sh script.
+4. Create secrets.sh file with the Trello credentials (for trello.sh) and the ElevenLabs API key (for the transcription). Like this:
+```bash
+#!/bin/zsh
+
+API_KEY="1234"
+TOKEN="123456789abc"
+ELEVENLABS_API_KEY="sk_..."
+```
 5. Visit vars.sh and adjust path to your locations:
   * COWSAY_DIR: where you want to store all the working files, mp3's, csv's, txt's etc.
   * COVER: cowsay podcast cover image for adding meta to resulting file.
-  * AZURE_DIR: azure file storage URL used for upload.
   * COWSAY_SOURCE: cowsay site sources location (its `_posts` dir).
   * SITE_DIR: the built site (`_site` inside the site sources). It must be a git clone of SITE_REPO.
   * SITE_REPO: GitHub repo the built site is pushed to. Cloudflare Pages deploys cowsay.show from it.
   * GITHUB_CERT_PATH: for pushing the site sources and the built site to Github.
   * LOCAL_ADDRESS: likely stays the same, for testing, local server.
   * PUBLIC_ADDRESS: also less probable to change, but who knows, cowsay show public site URL.
+  * R2_REMOTE, R2_BUCKET, PUBLIC_AUDIO_URL: Cloudflare R2 rclone remote and bucket for the episode mp3s, and their public URL.
+  * TRANSCRIBE_PROVIDER, TRANSCRIBE_LANGUAGE, ELEVENLABS_MODEL: speech-to-text settings (see providers/README.md).
+  * LLM_MODEL: Claude Code model used for the intro and topic detection.
+  * CUT_*: intro cut detection settings.
 6. Clone the built site repo into `_site` once, so publish.sh can push to it:
 ```bash
 git clone git@github.com:CowsayOrg/CowsayOrg.github.io.git /Users/user/Code/Cowsay/cowsay-source/_site
 ```
+7. Configure the R2 remote once with `rclone config` (name `cowsay-episodes`, type s3, provider Cloudflare). The token needs Object Read & Write on the `cowsay-show-episodes` bucket. The bucket has an object lock, so an uploaded mp3 can't be deleted or replaced until the lock expires.
 
 ## Deploy
 The site is deployed by Cloudflare Pages. publish.sh builds the site with `bundle exec octopod b`, then commits and pushes the contents of `_site` to SITE_REPO. Cloudflare Pages picks up the push and deploys it. The site sources are committed and pushed to their own repo afterwards. `octopod deploy` (rsync over ssh) is not used anymore.
 
+Episode mp3s are uploaded to Cloudflare R2 (`audio.sh -u`) and served from https://episodes.cowsay.show.
+
+Because of the bucket's object lock, a fixed audio for an episode is uploaded as `cow<ep>-rev1.mp3`, `-rev2`, and so on. The existing post is updated to point to it. Every upload is logged in `$COWSAY_DIR/r2-uploads.log`. Once the lock period has passed, delete the old revisions with:
+```bash
+./r2-uploads.sh cleanup -n   # dry run
+./r2-uploads.sh cleanup
+```
+
 ## How to use the scripts
-1. Before running the show use trello.sh to download the topics in a csv file.
+1. Before running the show use trello.sh to download the topics.
 ```bash
 ./trello.sh '11 April' 666
 ```
-2. While running the show load this csv file into Records app and register the timestamps.
-3. Generate the Records.csv file after the show. Name it Records-<show_number>.csv
-4. use episode.sh script to do the rest (prepare audio, description, publish). Follow the messages in the console and check for intermediate results.
+2. Run the show. Nothing to record by hand anymore. Optionally say "cut" on air right before the greeting, it makes the intro detection exact.
+3. Use episode.sh to do the rest: transcribe the recording, detect the intro cut, crop/compress/tag the audio, upload it, place the Trello topics on the timeline, generate the show notes and chapters, publish. Follow the messages in the console, it asks you to confirm the audio cut, the topics and the site.
 ```bash
-./episode.sh -e 666 -t "Live 666: April's dry run" -s "/Users/user/Downloads/666.mp3" -u
+./episode.sh -e 666 -n "Live 666: April's dry run" -l "/Users/user/Downloads/666.mp3" -u
 ```
 
-List of available options for this command:
-  * -e <number>, episode number
-  * -y <url>, youtube episode url in case it's used as a source
-  * -t <text>, episode title
-  * -s <path>, local mp3 source file to use
-  * -u, upload to azure
+The transcription (ElevenLabs) is the only paid step. It's cached per audio file, so re-running never pays twice for the same recording.
+
+## Logs
+There is an implicit logging system that will safe everything into .logs dir. Cannot be turned or customized for the moment.
+
+## Docs
+See WORKFLOW.md for the full description of every step, file and flag.
+
+List of available options for episode.sh:
+  * -e <number>, episode number (mandatory)
+  * -n <text>, episode title (mandatory)
+  * -l <path>, local mp3 source file to use (this or -y mandatory)
+  * -y <url>, youtube episode url in case it's used as a source (this or -l mandatory)
+  * -u, upload to R2
+  * -t, test run: fast crop, no compression, no cleanup. For script testing purposes.
+  * -r, rebuild files if this is not the first run for this episode (the transcription stays cached).
+  * -v, verbose.
 
 ### Don't forget to have fun ;)

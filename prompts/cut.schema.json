@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "found": { "type": "boolean" },
+    "start_seconds": { "type": "number", "minimum": 0 },
+    "quote": { "type": "string" },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+  },
+  "required": ["found", "start_seconds", "quote", "confidence"],
+  "additionalProperties": false
+}

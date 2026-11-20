@@ -1,6 +1,8 @@
 ffmpeg
 yt-dlp
-azcopy
+rclone
+curl
+claude
 csvformat
 git
 bundler

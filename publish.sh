@@ -21,8 +21,11 @@
 . ./vars.sh
 
 set -euo pipefail
-# set -x
-# set -m
+set -m
+
+if [ "${2:-}" = "-v" ]; then
+    set -x
+fi
 
 print_message "Preparing to execute the script"
 

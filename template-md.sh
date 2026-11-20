@@ -25,6 +25,7 @@
 . ./messages.sh
 . ./logging.sh
 . ./vars.sh
+. ./r2.sh
 
 # Prepare the logs
 prepare_logging "markdown"
@@ -65,7 +66,7 @@ fi
 cd "$EPISODE_DIR" > "$LOG" 2>&1
 
 day_suffix() {
-  case `date +%d` in
+  case $1 in
     1|21|31) echo "st";;
     2|22)    echo "nd";;
     3|23)    echo "rd";;
@@ -73,12 +74,30 @@ day_suffix() {
   esac
 }
 
-TITLE="$2"
-AUDIO_FILE_NAME="cow"$1".mp3"
-DURATION=$(ffprobe -i "$AUDIO_FILE_NAME" -show_entries format=duration -v quiet -of csv="p=0" -sexagesimal)
-DATE=$(date +"%Y-%m-%d")
-DATE_NAME=$(date +"%B %d`day_suffix`, %Y")
-AUDIO_SIZE=$(ls -l "$AUDIO_FILE_NAME" | cut -d ' ' -f 7)
+SQ="'"
+TITLE="${2//$SQ/$SQ$SQ}"    # single quotes are doubled inside a YAML '...' string
+AUDIO_FILE_NAME="cow"$1".mp3"            # local file
+AUDIO_OBJECT_NAME=$(r2_audio_name "$1")    # name in R2: cow<ep>.mp3 or cow<ep>-rev<n>.mp3 after a fix
+DURATION=$(post_duration "$AUDIO_FILE_NAME")
+AUDIO_SIZE=$(stat -f%z "$AUDIO_FILE_NAME")
+
+# Regenerating an already existing post keeps its file name and date
+EXISTING_POST=$(find_post "$1")
+if [ -n "$EXISTING_POST" ]; then
+    DATE="${${EXISTING_POST:t}[1,10]}"
+    print_message "Post ${EXISTING_POST:t} already exists, regenerating it with its original date"
+else
+    DATE=$(date +"%Y-%m-%d")
+fi
+DAY=$(date -j -f "%Y-%m-%d" "$DATE" +%e | tr -d ' ')
+DATE_NAME="$(date -j -f "%Y-%m-%d" "$DATE" +"%B %d")$(day_suffix "$DAY"), $(date -j -f "%Y-%m-%d" "$DATE" +%Y)"
+
+# Chapter marks from format.sh ("  - 'HH:MM:SS.mmm Title'" lines), empty if there are none
+CHAPTERS_FILE="chapters-"$1".yml"
+CHAPTERS=""
+if [ -f "$CHAPTERS_FILE" ]; then
+    CHAPTERS=$(< "$CHAPTERS_FILE")
+fi
 
 TOPICS_FILE="topics-"$1".md"
 OUTPUT_FILE=""$DATE"-"$1".md"
@@ -92,12 +111,13 @@ datum: $DATE_NAME
 layout: post
 author: Cowsay Crew ©
 explicit: 'no'
-duration: '${DURATION:0:-7}'
+duration: '$DURATION'
 audio:
-  mp3: $AUDIO_FILE_NAME
+  mp3: $AUDIO_OBJECT_NAME
 filesize:
   mp3: $AUDIO_SIZE
 chapters:
+$CHAPTERS
 ---
 
 {% podigee_player page %}
