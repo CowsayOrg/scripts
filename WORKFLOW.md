@@ -582,13 +582,15 @@ The Podigee player shows the chapters (Octopod reads `chapter[0..12]` as the sta
 |---|--------|---------|
 | 1 | Load the GitHub key | `ssh-add $GITHUB_CERT_PATH` |
 | 2 | Go to the site root and check that `$SITE_DIR` is a git repo | `cd`, `git rev-parse` |
-| 3 | Start the local server, wait for it, open the preview, then stop the server | `bundle exec octopod s &`, `open`, `kill` |
-| 4 | Ask `y/[n]`. Any answer other than `y` exits | `read` |
+| 3 | Start the local server, wait until it's up, and open the preview. If the server dies or doesn't start within 2 minutes, it stops with an error | `bundle exec octopod s &`, `open` |
+| 4 | Ask `y/[n]`, then stop the server. Any answer other than `y` exits with code 3 | `read`, `kill` |
 | 5 | Build the site into `$SITE_DIR` | `bundle exec octopod b` |
 | 6 | Deploy: commit and push `_site` to `$SITE_REPO`, which Cloudflare Pages deploys | `git -C $SITE_DIR add -A`, `commit`, `push` |
 | 7 | Open the live site, then commit and push the site sources | `open`, `git add .`, `commit`, `push` |
 
-`set -m` (job control) is on. `set -x` is on only with `-v`.
+The preview server keeps running until you answer, so the page can be browsed. It's also stopped when the script ends any other way (an `EXIT` trap). `set -x` is on only with `-v`.
+
+**No job control (`set -m`).** An earlier version turned it on to manage the background server. With job control, a `publish.sh` started from `episode.sh` is not in the terminal's foreground, and macOS stops it (`SIGTTIN`, state `T` in `ps`) as soon as it reads the answer. The run then hangs with no prompt, as happened with episode 174. Don't add it back. Background jobs and `kill` work without it.
 
 ### 5.10.1 `youtube-update.sh`: update the YouTube videos
 
@@ -692,7 +694,8 @@ All files below are in `$COWSAY_DIR/<ep>/`, except the post copy, which goes to 
 |---|-------|--------|
 | 1 | `-t` does not suppress `-u` | A test run still uploads if `-u` is given |
 | 2 | The older scripts log with `>` | Their logs keep only the last command's output |
-| 3 | Topic starts are the moment a topic is *introduced*, as Claude reads it | When the hosts lead into a topic for a while before naming it, the time can fall about 20 s either side of where a human would put the mark. Check the review step and press `e` to adjust |
+| 3 | Editing a script while `episode.sh` is running | zsh reads a script while running it, so editing it mid-run can make the running copy go wrong. Edit between runs |
+| 4 | Topic starts are the moment a topic is *introduced*, as Claude reads it | When the hosts lead into a topic for a while before naming it, the time can fall about 20 s either side of where a human would put the mark. Check the review step and press `e` to adjust |
 
 ---
 
