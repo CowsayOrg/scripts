@@ -27,7 +27,8 @@
 # Archived lists are searched too. Among lists with that day and month, the one created last
 # before the stream wins.
 #
-# Links of a card: its attachments, then the URLs in its description, without duplicates and
+# Links of a card: its attachments, then the URLs in its description (only the first one when there are
+# more than 3 different ones: that's a pasted article, not a list of sources), without duplicates and
 # without $TRELLO_LINK_EXCLUDE (private prep notes: Google Docs, chatgpt.site pages, uploads).
 #
 # Output: trello-<ep>.json  { list: {id, name}, cards: [ {name, links: [...], desc} ] }
@@ -132,13 +133,15 @@ jq --argjson list "$LIST" --argjson exclude "$(print -rl -- "${TRELLO_LINK_EXCLU
     def clean: sub("[).,;:!?\\]>*_]+$"; "");
     def untrack: (split("#") | .[0]) as $u | ($u | split("?")) as $p
         | if ($p | length) < 2 then .
-          else ($p[1] | split("&") | map(select(test("^(utm_[^=]*|fbclid|gclid|mc_[^=]*)=") | not)) | join("&")) as $q
+          else ($p[1] | split("&") | map(select(test("^(utm_[^=]*|fbclid|gclid|mc_[^=]*|_bhlid|ref_src)=") | not)) | join("&")) as $q
             | $p[0] + (if $q == "" then "" else "?" + $q end) end;
     { list: $list,
       cards: [ sort_by(.pos)[] | {
           name,
           links: ([ (.attachments[]? | select(.isUpload | not) | .url),
-                    (.desc | [ match("https?://[^\\s)\\]<>\"]+"; "g") | .string | clean ][]) ]
+                    # more than 3 different links in the description: a pasted article, keep only its first link
+                    (.desc | [ match("https?://[^\\s)\\]<>\"]+"; "g") | .string | clean ] | (reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end))
+                             | if length > 3 then .[0:1] else . end | .[]) ]
                   | map(untrack | select(excluded | not)) | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end)),
           desc: (.desc // "") } ] }' <<< "$CARDS" > "$OUTPUT"
 

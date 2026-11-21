@@ -16,7 +16,7 @@ R2_BUCKET="cowsay-show-episodes"
 PUBLIC_AUDIO_URL="https://episodes.cowsay.show"
 
 # Transcription: providers/<TRANSCRIBE_PROVIDER>.sh
-TRANSCRIBE_PROVIDER="elevenlabs"
+TRANSCRIBE_PROVIDER="${TRANSCRIBE_PROVIDER:-elevenlabs}"    # override per run: TRANSCRIBE_PROVIDER=youtube ./episode.sh ...
 TRANSCRIBE_LANGUAGE="ron"
 ELEVENLABS_MODEL="scribe_v3"
 
@@ -52,4 +52,4 @@ SHOW_TIMEZONE="Europe/Chisinau"   # the post date is the stream's date in this t
 
 # Trello (trello.sh): the board with one list per show, and links never published (private prep notes)
 TRELLO_BOARD_ID="KOfBQFVg"
-TRELLO_LINK_EXCLUDE=('docs\.google\.com' 'drive\.google\.com' 'chatgpt\.site' 'trello\.com')
+TRELLO_LINK_EXCLUDE=('docs\.google\.com' 'drive\.google\.com' 'chatgpt\.site' 'trello\.com' 'chatgpt\.com/(c|share|g)/' 'claude\.ai/(chat|share)/')

@@ -98,7 +98,7 @@ ELEVENLABS_API_KEY="sk_..."    # ElevenLabs speech-to-text
 | `R2_REMOTE` | rclone remote for Cloudflare R2 (`cowsay-episodes`) |
 | `R2_BUCKET` | R2 bucket holding the episode mp3s (`cowsay-show-episodes`) |
 | `PUBLIC_AUDIO_URL` | Public base URL of the mp3s (`https://episodes.cowsay.show`), matching `download_url` in the site's `_config.yml` |
-| `TRANSCRIBE_PROVIDER` | Transcription adapter in `providers/` (`elevenlabs`) |
+| `TRANSCRIBE_PROVIDER` | Transcription adapter in `providers/` (`elevenlabs`). The environment overrides it for one run: `TRANSCRIBE_PROVIDER=youtube ./episode.sh -e <ep>` |
 | `TRANSCRIBE_LANGUAGE` | Language code sent to the provider (`ron`, Romanian) |
 | `ELEVENLABS_MODEL` | ElevenLabs model id (`scribe_v3`) |
 | `LLM_MODEL` | Claude Code model alias for `claude -p` (`opus`) |
@@ -426,6 +426,7 @@ Adapters live in `providers/`. Each one is sourced by `transcribe.sh` and define
 | Provider | Status | Notes |
 |----------|--------|-------|
 | `elevenlabs` | ✅ | `POST https://api.elevenlabs.io/v1/speech-to-text` with `model_id=$ELEVENLABS_MODEL`, `language_code`, `timestamps_granularity=word` and `diarize=true`. Keeps the raw response as `<out>.provider.json` and reuses it for the same audio, so a fix in the conversion never needs a new paid call. It groups words into segments on a speaker change, a pause over 1.5 s or a sentence end |
+| `youtube` | ✅ | Free. YouTube's automatic captions of the stream (`stream-<ep>.json`), downloaded with yt-dlp, become the transcript (`"provider": "youtube"`, words with times, no speakers). They are on the video's timeline, so the adapter refuses audio whose duration differs from the stream's by more than `AUDIO_DURATION_TOLERANCE`: use it when the audio is YouTube's own download. Rougher than ElevenLabs, good enough for the intro cut and the topics. `youtube-update.sh` doesn't upload such a transcript as captions, YouTube already has them |
 | `whisper` | stub | Placeholder for a local `whisper.cpp`/`mlx-whisper` adapter |
 
 ---
@@ -606,7 +607,7 @@ The preview server keeps running until you answer, so the page can be browsed. I
 ### 5.10.1 `youtube-update.sh`: update the YouTube videos
 
 ```bash
-./youtube-update.sh -e <episode> [-n] [-r] [-v]
+./youtube-update.sh -e <episode> [-t "<title>"] [-n] [-r] [-v]
 ```
 
 It updates, through the YouTube Data API:
@@ -619,12 +620,26 @@ It updates, through the YouTube Data API:
 | "Lives" playlist (`$YT_LIVES_PLAYLIST`), skipped if it's already there | yes | no |
 | Captions `$YT_CAPTION_NAME` from `transcript-<ep>.raw.json`, shifted to the YouTube timeline, at most about 6 s or 80 characters per cue (`youtube-captions-<ep>.srt`) | yes | no |
 
-The title is left as it is on YouTube.
+The title is left as it is on YouTube, unless `-t "<title>"` is given: the main video gets that title, the vertical one the same with ` 📱`, and `stream-<ep>.json` is updated to match.
 
 - **Review first:** it shows a diff between what's on YouTube and what's proposed, then asks y/[n]. Nothing is written without a `y`.
 - **Flags:** `-n` is a dry run; without the login it shows the proposed content only. `-r` replaces our caption track if it's already there. Without `-r`, an existing track is kept.
 - **Before the one-time setup:** it prints a note and exits 0, so `episode.sh` keeps working.
 - **Quota:** about 600 of the 10,000 daily units per episode: 50 per video update, 51 for the playlist, 450 for the captions.
+
+### 5.10.1.1 `youtube-notes.sh`: show notes for an already published episode
+
+```bash
+./youtube-notes.sh -e <episode> [-t "<title>"] [-r] [-n] [-v]
+```
+
+For episodes whose post is on the site but whose YouTube description is still the stream's template. It needs neither the audio nor a paid transcription, and doesn't touch the post:
+
+1. `stream.sh`.
+2. If there is no `Records-<ep>.csv` (or with `-r`): YouTube's automatic captions as `transcript-<ep>.raw.json` (`providers/youtube.sh`). They are on the video timeline, so `cut-<ep>.txt` and `youtube-offset-<ep>.txt` are 0. Then the planned topics: `trello.sh`, or, without a Trello list, the topic list of the post (`### Temele săptămânii`). Then `topics.sh -r`.
+3. `format.sh`, `template-yt.sh`, `youtube-update.sh` (with `-t` and `-n` passed on).
+
+An existing `Records-<ep>.csv` (an old manual export) is used as it is: the old Records app marked the times on the stream, so they fit the video. In November 2026 this filled 155, 158, 159 and 162–173, and named 166 and 168–172.
 
 ### 5.10.2 `youtube-backfill.sh`: complete the Lives playlist
 
@@ -657,9 +672,10 @@ The scripts then refresh the access token by themselves, with no browser (`yt-ap
 
 The board (`$TRELLO_BOARD_ID`) has one list per show, named after the show date in various forms ("Nov 20", "28 July", "16th of September", "8 окт").
 - **Finding the list:** without `-l`, it matches the day and month in each list's name, including archived lists, against the stream date from `stream-<ep>.json`. If it has no date yet, it runs `stream.sh`. If several lists match, it takes the one created last before the stream; the creation time is encoded in the Trello id. Months can be written in English, Romanian or Russian.
-- **Links of a card:** its attachments, then the URLs in its description.
-  - Tracking parameters (`utm_*`, `fbclid`, `gclid`) are removed, then duplicates.
-  - Links matching `$TRELLO_LINK_EXCLUDE` are dropped. These are private prep notes that must not end up in a public description: Google Docs and Drive, `chatgpt.site` pages, and uploaded files.
+- **Links of a card:** its attachments, then the URLs in its description. A description with more than 3 different URLs is a pasted article, not a list of sources, so only its first URL is taken.
+  - Tracking parameters (`utm_*`, `fbclid`, `gclid`, `mc_*`, `_bhlid`, `ref_src`) are removed, then duplicates.
+  - Links matching `$TRELLO_LINK_EXCLUDE` are dropped. These are private prep notes that must not end up in a public description: Google Docs and Drive, `chatgpt.site` pages, private ChatGPT and Claude conversations (`chatgpt.com/c/…`, `claude.ai/chat/…`), and files uploaded to Trello (they need a Trello login).
+  - Newsletter redirect links (`elink….dupple.com`) are kept as they are: they sit behind a Cloudflare bot check, so the real URL can't be looked up by a script.
 - **Output:** `trello-<ep>.json`: `{list: {id, name}, cards: [{name, links, desc}]}`. Auth comes from `API_KEY` and `TOKEN` in `secrets.sh`.
 
 `episode.sh` runs it before `topics.sh`. If it finds no list, the run continues without links.
@@ -667,6 +683,8 @@ The board (`$TRELLO_BOARD_ID`) has one list per show, named after the show date 
 **How links are shown** (`format.sh`):
 - with one link, the whole title is the link: `* [Title](url)` on the site, `Title: url` on YouTube;
 - with several, they're listed: `* Title ([link1](url1), [link2](url2))` on the site, `Title: url1, url2` on YouTube.
+
+`format.sh` drops the `$TRELLO_LINK_EXCLUDE` links again, so they're filtered out of old manual Records files and of topics copied from a post too.
 
 ### 5.12 `.mcp.json` and `trello-mcp.sh`
 

@@ -137,8 +137,20 @@ do
         echo "* $col2"  >> "$EPISODE_TOPICS_FILE"
     else
         # Links are separated by spaces: one link makes the whole title a link, several are listed
-        LINKS=(${=col3})
-        if [ ${#LINKS} -eq 1 ]; then
+        # Links nobody else can open (TRELLO_LINK_EXCLUDE: private docs, chats, Trello uploads) are dropped,
+        # also from old manual Records files
+        LINKS=()
+        for l in ${=col3}; do
+            excluded=false
+            for p in "${TRELLO_LINK_EXCLUDE[@]}"; do
+                if print -r -- "$l" | grep -qiE "$p"; then excluded=true; break; fi
+            done
+            [ "$excluded" = false ] && LINKS+=("$l")
+        done
+        if [ ${#LINKS} -eq 0 ]; then
+            echo "$VIDEO_TIME - $col2"  >> "$YOUTUBE_TOPICS_FILE"
+            echo "* $col2"  >> "$EPISODE_TOPICS_FILE"
+        elif [ ${#LINKS} -eq 1 ]; then
             echo "$VIDEO_TIME - $col2: ${LINKS[1]}"  >> "$YOUTUBE_TOPICS_FILE"
             echo "* [$col2](${LINKS[1]})"  >> "$EPISODE_TOPICS_FILE"
         else

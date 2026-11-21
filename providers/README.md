@@ -36,9 +36,10 @@ The function must return non-zero on failure. All variables from `vars.sh` and `
 
 1. Create `providers/<name>.sh` that defines `provider_transcribe`.
 2. Put any keys it needs in `secrets.sh`.
-3. Set `TRANSCRIBE_PROVIDER="<name>"` in `vars.sh`.
+3. Set `TRANSCRIBE_PROVIDER="<name>"` in `vars.sh`, or for one run: `TRANSCRIBE_PROVIDER=<name> ./episode.sh ...`.
 
 Available providers:
 
 - `elevenlabs`: ElevenLabs Scribe.
+- `youtube`: YouTube's automatic captions of the stream (free). Only for audio that is YouTube's own download, since the captions are on the video timeline.
 - `whisper`: placeholder for a local model.

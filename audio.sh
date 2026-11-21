@@ -167,6 +167,9 @@ add_metadata() {
     fi
     ARTIST="Cowsay Show"
     YEAR=$(date +%Y)
+    if [ -s "stream-$EPISODE_NUMBER.json" ] && [ -n "$(jq -r '.date // empty' "stream-$EPISODE_NUMBER.json")" ]; then
+        YEAR=$(jq -r '.date[0:4]' "stream-$EPISODE_NUMBER.json")    # the year it was streamed, for old episodes
+    fi
     GENRE="Podcast"
 
     ffmpeg -nostdin -y -i "$COMPRESSED" -i "$COVER" -map 0 -map 1 -metadata title="$TITLE" -metadata artist="$ARTIST" -metadata genre="$GENRE" -metadata year="$YEAR" -c copy "$FINAL" >> "$LOG" 2>&1

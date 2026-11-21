@@ -3,7 +3,8 @@
 # Update the episode's YouTube videos: description (with chapters and the link to the post),
 # tags, category and language, the "Lives" playlist, and our transcript as captions.
 #
-# Usage: ./youtube-update.sh -e <episode> [-n] [-r] [-v]
+# Usage: ./youtube-update.sh -e <episode> [-t "<title>"] [-n] [-r] [-v]
+#   -t  rename the video (the vertical one gets the same title with " 📱"); without it the title is kept
 #   -n  dry run: show what would change, change nothing (works without the YouTube login too)
 #   -r  replace our caption track if it is already there
 #
@@ -11,7 +12,8 @@
 #   stream-<ep>.json          the stream ids (stream.sh)
 #   youtube-<ep>.txt          the description (template-yt.sh)
 #   Records-<ep>.csv          topic titles, used as tags (topics.sh)
-#   transcript-<ep>.raw.json  for the captions (audio.sh), shifted by youtube-offset-<ep>.txt (yt-align.sh)
+#   transcript-<ep>.raw.json  for the captions (audio.sh), shifted by youtube-offset-<ep>.txt (yt-align.sh);
+#                             not uploaded when it was made from YouTube's own captions (providers/youtube.sh)
 #   the post in $COWSAY_SOURCE, for the link
 # The vertical 📱 stream gets the same description, tags, category and language, with a link to the
 # main video on top. It gets no playlist and no captions (its timeline differs by a few seconds).
@@ -35,14 +37,16 @@ set -euo pipefail
 EPISODE_NUMBER=""
 DRY_RUN=false
 REPLACE_CAPTIONS=false
+NEW_TITLE=""
 
-while getopts ":e:nrv" opt; do
+while getopts ":e:t:nrv" opt; do
     case ${opt} in
         e ) EPISODE_NUMBER=$OPTARG ;;
+        t ) NEW_TITLE=$OPTARG ;;
         n ) DRY_RUN=true ;;
         r ) REPLACE_CAPTIONS=true ;;
         v ) set -x ;;
-        * ) echo "Usage: $0 -e <episode> [-n] [-r] [-v]" >&2; exit 1 ;;
+        * ) echo "Usage: $0 -e <episode> [-t \"<title>\"] [-n] [-r] [-v]" >&2; exit 1 ;;
     esac
 done
 
@@ -121,10 +125,10 @@ TAGS=$(jq -n --argjson base "$(print -rl -- "${YT_BASE_TAGS[@]}" | jq -R . | jq 
                 | sub("^\\[[^]]*\\]\\s*"; "") | gsub("[<>]"; "") | gsub("\\s*,\\s*"; " ") | select(length > 0 and length <= 100)) ]
     | reduce .[] as $t ([]; if (map(cost) | add // 0) + ($t | cost) <= 500 and (index([$t]) | not) then . + [$t] else . end)')
 
-# snippet <video json> <description>: the snippet to send (title kept as it is on YouTube)
+# snippet <video json> <description> [<title>]: the snippet to send (without a title, the one on YouTube is kept)
 snippet() {
-    jq --arg d "$2" --argjson tags "$TAGS" --arg cat "$YT_CATEGORY_ID" --arg lang "$YT_LANGUAGE" '
-        { title: .snippet.title, description: $d, tags: $tags, categoryId: $cat,
+    jq --arg d "$2" --arg t "${3:-}" --argjson tags "$TAGS" --arg cat "$YT_CATEGORY_ID" --arg lang "$YT_LANGUAGE" '
+        { title: (if $t == "" then .snippet.title else $t end), description: $d, tags: $tags, categoryId: $cat,
           defaultLanguage: $lang, defaultAudioLanguage: $lang }' <<< "$1"
 }
 
@@ -135,7 +139,9 @@ render() {
 
 # Captions: segments split into cues of at most ~6 s or ~80 characters, on the YouTube timeline
 CAPTIONS=false
-if [ -s "$TRANSCRIPT" ]; then
+if [ -s "$TRANSCRIPT" ] && [ "$(jq -r '.provider // empty' "$TRANSCRIPT")" = youtube ]; then
+    print_message "The transcript is YouTube's own automatic captions, no captions to upload"
+elif [ -s "$TRANSCRIPT" ]; then
     YT_OFFSET=0
     if [ -s "$OFFSET_FILE" ]; then
         YT_OFFSET=$(< "$OFFSET_FILE")
@@ -166,7 +172,7 @@ fi
 if [ "$CONFIGURED" = false ]; then
     EMPTY='{"snippet":{"title":"(current title)"}}'
     print_message "=== Main video $MAIN_ID ==="
-    render "$(snippet "$EMPTY" "$MAIN_DESCRIPTION")"
+    render "$(snippet "$EMPTY" "$MAIN_DESCRIPTION" "$NEW_TITLE")"
     if [ -n "$VERTICAL_ID" ]; then
         print_message "=== Vertical video $VERTICAL_ID: same, with this first line ==="
         print -r -- "${VERTICAL_DESCRIPTION%%$'\n'*}"
@@ -180,7 +186,7 @@ if [ -z "$MAIN_VIDEO" ]; then
     print_error "Video $MAIN_ID not found, or this channel can't edit it"
     exit 1
 fi
-MAIN_NEW=$(snippet "$MAIN_VIDEO" "$MAIN_DESCRIPTION")
+MAIN_NEW=$(snippet "$MAIN_VIDEO" "$MAIN_DESCRIPTION" "$NEW_TITLE")
 MAIN_CHANGED=false
 print_message "=== Main video https://youtu.be/$MAIN_ID ==="
 if diff -u --label "now on YouTube" --label "proposed" <(render "$(jq '.snippet' <<< "$MAIN_VIDEO")") <(render "$MAIN_NEW"); then
@@ -193,7 +199,7 @@ VERTICAL_CHANGED=false
 if [ -n "$VERTICAL_ID" ]; then
     VERTICAL_VIDEO=$(yt_video "$VERTICAL_ID")
     if [ -n "$VERTICAL_VIDEO" ]; then
-        VERTICAL_NEW=$(snippet "$VERTICAL_VIDEO" "$VERTICAL_DESCRIPTION")
+        VERTICAL_NEW=$(snippet "$VERTICAL_VIDEO" "$VERTICAL_DESCRIPTION" "${NEW_TITLE:+$NEW_TITLE 📱}")
         print_message "=== Vertical video https://youtu.be/$VERTICAL_ID ==="
         if diff -u --label "now on YouTube" --label "proposed" <(render "$(jq '.snippet' <<< "$VERTICAL_VIDEO")") <(render "$VERTICAL_NEW"); then
             print_message "Already up to date"
@@ -248,6 +254,9 @@ fi
 if [ "$MAIN_CHANGED" = true ]; then
     yt_api_json PUT "$YT_API/videos?part=snippet" "$(jq -n --arg id "$MAIN_ID" --argjson s "$MAIN_NEW" '{ id: $id, snippet: $s }')" > /dev/null
     print_success "Main video updated"
+    if [ -n "$NEW_TITLE" ]; then    # keep the cached stream title in step (template-md.sh, audio.sh read it)
+        jq --arg t "$NEW_TITLE" '.title = $t' "$STREAM_FILE" > "$STREAM_FILE.tmp" && mv "$STREAM_FILE.tmp" "$STREAM_FILE"
+    fi
 fi
 if [ "$VERTICAL_CHANGED" = true ]; then
     yt_api_json PUT "$YT_API/videos?part=snippet" "$(jq -n --arg id "$VERTICAL_ID" --argjson s "$VERTICAL_NEW" '{ id: $id, snippet: $s }')" > /dev/null
