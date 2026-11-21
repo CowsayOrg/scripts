@@ -20,7 +20,6 @@ cd "${0:A:h}"
 set -euo pipefail
 
 USAGE="-e <number> [-n <title>] [-l <file> | -y <url>] [-u] [-t] [-r] [-v]  or  -a [-u] [-t] [-r] [-v]"
-REVIEW_DECLINED=3    # exit code when the topics are not accepted
 
 usage_error() {
     print_error "$1"
@@ -80,8 +79,13 @@ if [ "$ALL" = true ]; then
     fi
 
     print_message "Unpublished: ${(j:, :)UNPUBLISHED}"
-    print_message "Publish them? y / [n] / the numbers to publish (e.g. ${UNPUBLISHED[-1]})"
-    read ANSWER
+    if headless; then
+        ANSWER="${COWSAY_EPISODES:-}"    # y, or the numbers to publish
+        [ -n "$ANSWER" ] || { echo "NEEDS_REVIEW: episodes (set COWSAY_EPISODES to y or the numbers)"; exit $NEEDS_REVIEW; }
+    else
+        print_message "Publish them? y / [n] / the numbers to publish (e.g. ${UNPUBLISHED[-1]})"
+        read ANSWER
+    fi
     if [ "$ANSWER" = "y" ]; then
         SELECTED=("${UNPUBLISHED[@]}")
     elif [[ "$ANSWER" =~ ^[0-9[:space:],]+$ ]]; then
@@ -99,7 +103,7 @@ if [ "$ALL" = true ]; then
         print_message "=== Episode $ep ==="
         if "./$SCRIPT_NAME" -e "$ep" "${AUDIO_FLAGS[@]}" "${COMMON_FLAGS[@]}"; then
             DONE+=("$ep")
-        elif [ $? -eq $REVIEW_DECLINED ]; then
+        elif [ $? -eq $NEEDS_REVIEW ]; then
             STOPPED+=("$ep")
         else
             FAILED+=("$ep")
@@ -156,21 +160,27 @@ fi
 REVIEW_FILE="$EPISODE_DIR/topics-$EPISODE_NUMBER.review.txt"
 RECORDS_FILE="$EPISODE_DIR/Records-$EPISODE_NUMBER.csv"
 
-if [ -f "$REVIEW_FILE" ]; then
-    cat "$REVIEW_FILE"
-else
-    cat "$RECORDS_FILE"
+if ! { headless && approved topics; }; then    # an approved headless run doesn't print them again
+    if [ -f "$REVIEW_FILE" ] && [ ! "$RECORDS_FILE" -nt "$REVIEW_FILE" ]; then    # Records edited by hand: show it
+        cat "$REVIEW_FILE"
+    else
+        cat "$RECORDS_FILE"
+    fi
 fi
-print_message "Use these topics? y / [n] / e to edit $RECORDS_FILE first"
-read ANSWER
+if headless; then
+    gate topics "edit $RECORDS_FILE to fix them"
+else
+    print_message "Use these topics? y / [n] / e to edit $RECORDS_FILE first"
+    read ANSWER
 
-if [ "$ANSWER" = "e" ]; then
-    open -t "$RECORDS_FILE"
-    print_message "Edit and save the file, then press Enter to continue"
-    read
-elif [ "$ANSWER" != "y" ]; then
-    print_error "Not using these topics. Run again with -r to regenerate them, or edit $RECORDS_FILE"
-    exit $REVIEW_DECLINED
+    if [ "$ANSWER" = "e" ]; then
+        open -t "$RECORDS_FILE"
+        print_message "Edit and save the file, then press Enter to continue"
+        read
+    elif [ "$ANSWER" != "y" ]; then
+        print_error "Not using these topics. Run again with -r to regenerate them, or edit $RECORDS_FILE"
+        exit $NEEDS_REVIEW
+    fi
 fi
 
 # 4. Where the YouTube video starts against the raw audio, for its timestamps and captions

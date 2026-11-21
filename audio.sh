@@ -112,8 +112,33 @@ shift_to_podcast_timeline() {
     transcript_to_text "$TRANSCRIPT" "$TRANSCRIPT_TXT"
 }
 
+# Headless preview: the transcript around the cut instead of playing the audio.
+# COWSAY_CUT=<seconds> sets the cut by hand (counts as approved, like typing it at the prompt).
+preview_headless() {
+    if [ -n "${COWSAY_CUT:-}" ]; then
+        [[ "$COWSAY_CUT" =~ '^[0-9]+([.][0-9]+)?$' ]] || { print_error "COWSAY_CUT must be seconds"; exit 1; }
+        if [ "$COWSAY_CUT" != "$CUT" ]; then
+            print -r -- "$COWSAY_CUT" > "$CUT_FILE"
+            print -r -- "manual"$'\t'"set with COWSAY_CUT" > "$CUT_INFO"
+            crop
+            shift_to_podcast_timeline
+        fi
+        print_message "Intro cut set by hand at $CUT s"
+        return 0
+    fi
+    print_message "Intro cut at $(jq -rn "$JQ_TIME"" $CUT | hmsms") ($(cut -f1 "$CUT_INFO" 2>/dev/null || echo existing)) $(cut -f2- "$CUT_INFO" 2>/dev/null || true)"
+    if ! approved cut; then
+        print_message "Raw transcript around the cut (>> marks the first kept line):"
+        jq -r --argjson c "$CUT" "$JQ_TIME"'
+            .segments[] | select(.start > $c - 25 and .start < $c + 25)
+            | "\(if .start >= $c then ">>" else "  " end) \(.start | hms) \(.speaker // "") \(.text[0:110])"' "$RAW_TRANSCRIPT"
+    fi
+    gate cut "the intro cut; or set COWSAY_CUT=<seconds>"
+}
+
 preview() {
     local method evidence answer
+    if headless; then preview_headless; return; fi
     while true; do
         method=$(cut -f1 "$CUT_INFO" 2>/dev/null || echo "existing")
         evidence=$(cut -f2- "$CUT_INFO" 2>/dev/null || echo "")

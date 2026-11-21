@@ -238,6 +238,19 @@ Watch the console. Three steps stop and wait for you:
 
 **Cost:** the ElevenLabs transcription is the only paid step, about one call per episode. It is cached by the md5 of the raw audio, so reruns, including `-r`, never pay twice for the same audio. The Claude calls run through the Claude Code CLI.
 
+### Headless mode (for Claude Code)
+
+`COWSAY_HEADLESS=1` makes every script run without touching the desktop: no browser (`open`), no Quick Look, no text editor, no clipboard (`pbcopy`), no colors and no prompts. Each prompt becomes a **gate** that passes only if its name is in `COWSAY_APPROVE` (comma separated: `cut`, `topics`, `site`, `youtube`, `backfill`, or `all`). Otherwise the script prints what there is to review and exits with code 3 and a `NEEDS_REVIEW: <gate>` line. Rerunning with the approval continues from the cached files.
+
+| Gate | Instead of | Shows |
+|------|------------|-------|
+| `cut` (`audio.sh`) | Quick Look on the crop | the raw transcript lines around the cut; `COWSAY_CUT=<seconds>` sets it by hand |
+| `topics` (`episode.sh`) | the y/n/e prompt | the review list (or `Records-<ep>.csv` if it was edited after it) |
+| `site` (`publish.sh`) | the local server and the browser | the post's title, date and mp3, and the uncommitted site source changes |
+| `youtube` (`youtube-update.sh`), `backfill` (`youtube-backfill.sh`) | the y/n prompt | the diff / the missing videos |
+
+`episode.sh -a` takes its answer from `COWSAY_EPISODES` (`y` or the numbers). The Claude Code skill `.claude/skills/cowsay-episode/` drives the pipeline this way through `run.sh`, which keeps the full output in `$COWSAY_DIR/<ep>/headless.log` and prints only the useful lines.
+
 ---
 
 ## 5. Utilities reference

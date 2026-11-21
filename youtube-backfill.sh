@@ -57,8 +57,13 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
-print_message "Add these $COUNT videos? y/[n]"
-read ANSWER
+if headless; then
+    gate backfill "add these $COUNT videos to the Lives playlist"
+    ANSWER=y
+else
+    print_message "Add these $COUNT videos? y/[n]"
+    read ANSWER
+fi
 if [ "$ANSWER" != "y" ]; then
     print_error "Nothing changed"
     exit 0

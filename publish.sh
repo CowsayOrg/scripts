@@ -50,7 +50,8 @@ fi
 # Check for certificates to be there
 print_message "Add Github certificate"
 cd ~/.ssh
-ssh-add "$GITHUB_CERT_PATH" > "$LOG" 2>&1
+ssh-add "$GITHUB_CERT_PATH" > "$LOG" 2>&1 \
+    || { headless && print_message "ssh-add failed (no terminal for a passphrase), pushing with the keys already in the agent"; }
 
 # Go to cowsay source
 
@@ -63,38 +64,51 @@ if ! git -C "$SITE_DIR" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     exit 1
 fi
 
-# Run server and open the page to check
-print_message "Launching the server... openning the page"
-
-bundle exec octopod s > "$LOG" 2>&1 &
-PID=$!
-trap 'kill $PID 2> /dev/null || true' EXIT    # the preview server stops when the script ends, however it ends
-WAITED=0
-until grep -q "Server address: "$LOCAL_ADDRESS"" "$LOG"; do
-    if ! kill -0 $PID 2> /dev/null || (( WAITED >= 120 )); then
-        print_error "The preview server didn't start, see $LOG"
-        exit 1
+if headless; then
+    # No preview server and no browser: show the post, build only once approved
+    POST=$(ls "$COWSAY_SOURCE"*-"$1".md 2> /dev/null | tail -1)
+    if ! approved site; then
+        print_message "Post: ${POST:-not found}"
+        [ -n "$POST" ] && grep -m3 -E '^(title|date):|^  mp3:' "$POST" || true
+        print_message "Site source changes:"
+        git status --short
     fi
-    sleep 1
-    WAITED=$(( WAITED + 1 ))
-done
-open "$LOCAL_ADDRESS"
-
-# Ask user to deploy this variant
-
-print_message "Do you want to proceed with this variant? y/[n]"
-read ANSWER
-kill $PID 2> /dev/null || true    # stop the preview server before the production build
-wait $PID 2> /dev/null || true
-
-if [ -z "$ANSWER" ]; then
-    print_error "Not using this variant, please run the script again"
-    exit 3    # declined, see REVIEW_DECLINED in episode.sh
-elif [ "$ANSWER" = "y" ]; then
+    gate site "build and push the site; preview it yourself with: cd $(pwd) && bundle exec octopod s"
     bundle exec octopod b > "$LOG" 2>&1
 else
-    print_error "Not using this variant, please run the script again"
-    exit 3
+    # Run server and open the page to check
+    print_message "Launching the server... openning the page"
+
+    bundle exec octopod s > "$LOG" 2>&1 &
+    PID=$!
+    trap 'kill $PID 2> /dev/null || true' EXIT    # the preview server stops when the script ends, however it ends
+    WAITED=0
+    until grep -q "Server address: "$LOCAL_ADDRESS"" "$LOG"; do
+        if ! kill -0 $PID 2> /dev/null || (( WAITED >= 120 )); then
+            print_error "The preview server didn't start, see $LOG"
+            exit 1
+        fi
+        sleep 1
+        WAITED=$(( WAITED + 1 ))
+    done
+    open "$LOCAL_ADDRESS"
+
+    # Ask user to deploy this variant
+
+    print_message "Do you want to proceed with this variant? y/[n]"
+    read ANSWER
+    kill $PID 2> /dev/null || true    # stop the preview server before the production build
+    wait $PID 2> /dev/null || true
+
+    if [ -z "$ANSWER" ]; then
+        print_error "Not using this variant, please run the script again"
+        exit 3    # declined, see NEEDS_REVIEW in messages.sh
+    elif [ "$ANSWER" = "y" ]; then
+        bundle exec octopod b > "$LOG" 2>&1
+    else
+        print_error "Not using this variant, please run the script again"
+        exit 3
+    fi
 fi
 
 # Deploy: push the built site to GitHub, Cloudflare Pages picks it up from there
@@ -111,7 +125,7 @@ fi
 
 print_success "Site is pushed, Cloudflare Pages will deploy it shortly 🐮"
 
-open "$PUBLIC_ADDRESS"
+ui_open "$PUBLIC_ADDRESS"
 
 # Update source repo
 

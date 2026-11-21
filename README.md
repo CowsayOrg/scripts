@@ -54,6 +54,10 @@ The transcription (ElevenLabs) is the only paid step. It's cached per audio file
 
 For a free run, use YouTube's automatic captions instead (only when the audio is YouTube's own download): `TRANSCRIBE_PROVIDER=youtube ./episode.sh -e 666 -u`.
 
+With Claude Code, ask it to publish an episode: the `cowsay-episode` skill runs the same pipeline headless (no browser, Quick Look or clipboard) and asks you at each review step in the chat. See "Headless mode" in WORKFLOW.md.
+
+The skill lives in its own repo (`CowsayOrg/cowsay-episode-skill`, private), included as a submodule at `.claude/skills/cowsay-episode`. Claude Code loads it from there, with nothing to install. Clone with `git clone --recurse-submodules`, or in an existing clone run `git submodule update --init`. To get a newer version of the skill: `git submodule update --remote`, then commit the new pointer.
+
 ## YouTube
 After publishing, `youtube-update.sh` sets the episode's YouTube description (with chapters and the link to the post), tags, category and language, adds it to the "Lives" playlist, and uploads our transcript as captions. It shows a diff and asks first. It needs a one-time Google setup, described in WORKFLOW.md under "YouTube API setup". Until then the step is skipped.
 ```bash

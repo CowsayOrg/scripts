@@ -40,9 +40,13 @@ print(urllib.parse.urlencode({
     "code_challenge": sys.argv[4], "code_challenge_method": "S256", "state": sys.argv[5]}))
 ' "$CLIENT_ID" "$REDIRECT" "$YT_SCOPE" "$CHALLENGE" "$STATE")"
 
-print_message "Opening the browser. Sign in, choose the @cowsay channel, and allow access."
-print_message "If it doesn't open, visit: $AUTH_URL"
-open "$AUTH_URL"
+if headless; then
+    print_message "Open this in a browser, sign in, choose the @cowsay channel, and allow access: $AUTH_URL"
+else
+    print_message "Opening the browser. Sign in, choose the @cowsay channel, and allow access."
+    print_message "If it doesn't open, visit: $AUTH_URL"
+    open "$AUTH_URL"
+fi
 
 # Wait for the redirect with the code (one request, then the server stops)
 CODE=$(python3 -I -c '

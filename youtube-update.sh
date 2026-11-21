@@ -241,8 +241,13 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
-print_message "Apply these changes on YouTube? y/[n]"
-read ANSWER
+if headless; then
+    gate youtube "apply the changes above on YouTube"
+    ANSWER=y
+else
+    print_message "Apply these changes on YouTube? y/[n]"
+    read ANSWER
+fi
 if [ "$ANSWER" != "y" ]; then
     print_error "Nothing changed on YouTube"
     exit 0

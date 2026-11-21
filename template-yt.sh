@@ -91,6 +91,10 @@ echo "$HEADER" >> "$OUTPUT_FILE"
 cat "$TOPICS_FILE" >> "$OUTPUT_FILE"
 echo "$FOOTER" >> "$OUTPUT_FILE"
 
-pbcopy < "$OUTPUT_FILE" > "$LOG" 2>&1
+if headless; then
+    print_message "Description: $OUTPUT_FILE (headless, not copied to the clipboard)"
+else
+    pbcopy < "$OUTPUT_FILE" > "$LOG" 2>&1
+fi
 
 print_success "Youtube(Facebook) show notes have been successfully created"

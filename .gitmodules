@@ -1,0 +1,3 @@
+[submodule ".claude/skills/cowsay-episode"]
+	path = .claude/skills/cowsay-episode
+	url = git@github.com:CowsayOrg/cowsay-episode-skill.git
