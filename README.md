@@ -82,7 +82,7 @@ List of available options for episode.sh:
   * -y <url>, download the audio from this url instead
   * -u, upload to R2
   * -t, test run: fast crop, no compression, no cleanup. For script testing purposes.
-  * -r, rebuild files if this is not the first run for this episode (the transcription stays cached).
+  * -r <steps>, redo these steps on a rerun, comma separated: stream, audio, cut, topics, align, or all (everything but the cut). Everything else already built is reused, and the transcription stays cached.
   * -v, verbose.
 
 ### Don't forget to have fun ;)

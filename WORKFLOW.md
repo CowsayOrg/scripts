@@ -262,8 +262,8 @@ Runs the whole post-show pipeline for one episode (`-e`) or for every unpublishe
 **Usage**
 
 ```bash
-./episode.sh -e <number> [-n <title>] [-l <path> | -y <url>] [-u] [-t] [-r] [-v]
-./episode.sh -a [-u] [-t] [-r] [-v]
+./episode.sh -e <number> [-n <title>] [-l <path> | -y <url>] [-u] [-t] [-r <steps>] [-v]
+./episode.sh -a [-u] [-t] [-r <steps>] [-v]
 ```
 
 | Flag | Argument | Required | Description |
@@ -275,10 +275,23 @@ Runs the whole post-show pipeline for one episode (`-e`) or for every unpublishe
 | `-y` | `<url>` | no | Download the audio from this URL instead. Only with `-e` |
 | `-u` | – | no | Upload the final mp3 to R2 (passed to `audio.sh`) |
 | `-t` | – | no | Test run (passed to `audio.sh`) |
-| `-r` | – | no | Rebuild existing files and look the stream up again (passed to `stream.sh`, `audio.sh` and `topics.sh`). The transcription stays cached |
+| `-r` | `<steps>` | no | Redo these steps, comma separated (see below). The transcription stays cached |
 | `-v` | – | no | Verbose. Enables `set -x` and passes `-v` on to every step |
 
 Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combined with `-e`, `-n`, `-l` or `-y`, and `-l` with `-y`.
+
+**Reruns.** Everything already built is reused, so a rerun (after a review gate, or a failed step) only does what's left: the final mp3 isn't cropped and compressed again (see 5.2), the Trello cards aren't fetched again once `Records-<ep>.csv` exists, and `publish.sh` skips the build when the site has no changes. `-r` redoes chosen steps:
+
+| Step | Redoes | Passed as |
+|------|--------|-----------|
+| `stream` | the YouTube stream lookup | `stream.sh -r` |
+| `audio` | the raw copy and the final mp3; the cut is kept | `audio.sh -r` |
+| `cut` | the intro cut detection, replacing a cut set by hand | `audio.sh -c` |
+| `topics` | the Trello export and the topic placement (an LLM call) | `trello.sh`, `topics.sh -r` |
+| `align` | the YouTube offset | `yt-align.sh -r` |
+| `all` | all of the above except `cut` (`-r all,cut` for that too) | |
+
+For example `-r topics` after declining the topics, without touching the audio.
 
 **Sequence (`-e`)**
 
@@ -287,8 +300,8 @@ Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combine
    - the source: `-l` or `-y`, otherwise `./find-audio.sh -e <ep>`, otherwise the stream URL.
 
    If the stream lookup fails, the run only continues when both `-n` and `-l`/`-y` were given.
-1. `./audio.sh -e <ep> -l <path> | -y <url> [-u] [-t] [-r] [-v]`
-2. `./topics.sh -e <ep> [-r] [-v]`
+1. `./audio.sh -e <ep> -l <path> | -y <url> [-u] [-t] [-r] [-c] [-v]`
+2. `./trello.sh -e <ep> [-v]` (skipped when `Records-<ep>.csv` exists, unless `-r topics`), then `./topics.sh -e <ep> [-r] [-v]`
 3. Review of `topics-<ep>.review.txt`: `y` / `[n]` / `e`. Declining exits with code 3
 4. `./yt-align.sh -e <ep> [-r] [-v]`
 5. `./format.sh <ep> [-v]`
@@ -305,7 +318,7 @@ Without `-e` or `-a` it stops with an error and the usage. `-a` can't be combine
    - `y` runs all of them;
    - a list of numbers (`174 175`) runs only those;
    - anything else stops.
-2. Runs `./episode.sh -e <ep>` with the same `-u -t -r -v` for each, oldest first. Each episode has its own prompts and is published on its own.
+2. Runs `./episode.sh -e <ep>` with the same `-u -t -r <steps> -v` for each, oldest first. Each episode has its own prompts and is published on its own.
 3. A failed episode doesn't stop the others. At the end it prints which episodes are done, which stopped at a review (exit code 3), and which failed.
 
 ### 5.1.1 `stream.sh`: the episode's YouTube stream
@@ -356,7 +369,7 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 **Usage**
 
 ```bash
-./audio.sh -e <number> (-l <path> | -y <url>) [-u] [-t] [-r] [-v]
+./audio.sh -e <number> (-l <path> | -y <url>) [-u] [-t] [-r] [-c] [-v]
 ```
 
 | Flag | Argument | Required | Description |
@@ -366,7 +379,8 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 | `-y` | `<url>` | one of `-l`/`-y` | YouTube URL to download |
 | `-u` | – | no | Upload the final mp3 to R2 |
 | `-t` | – | no | Test run. Fast stream-copy crop, no compression, no cleanup |
-| `-r` | – | no | Rebuild the raw copy, cut point, crop, compression and tags |
+| `-r` | – | no | Rebuild the raw copy and the final mp3 (crop, compression and tags). The cut is kept |
+| `-c` | – | no | Detect the cut again, replacing one set by hand |
 | `-v` | – | no | Verbose (`set -x`), also passed to `transcribe.sh` and `detect-cut.sh` |
 
 **Files** (in `$COWSAY_DIR/<ep>/`)
@@ -380,6 +394,7 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 | `transcript-<ep>.json`, `transcript-<ep>.txt` | Transcript shifted to the podcast timeline; JSON, and `[HH:MM:SS]` text for the LLM |
 | `compressed<ep>.mp3` | Compressor applied |
 | `cow<ep>.mp3` | Tagged, with cover art. This is the deliverable |
+| `cow<ep>.mp3.build` | What `cow<ep>.mp3` was built from: cut, mode (test/full), title and year |
 
 **Stages**
 
@@ -387,16 +402,16 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 |---|----------|--------------|---------|
 | 1 | `prepare_raw` | Copies `-l` or downloads `-y` into `raw<ep>.mp3`. Skipped if it exists, unless `-r` is given | `cp` / `yt-dlp -x --audio-format mp3` |
 | 2 | `transcribe_raw` | Transcribes the raw audio. Cached by audio md5 | `transcribe.sh` |
-| 3 | `detect_cut` | Finds the start of the show. Rerun if the transcript is newer or `-r` is given | `detect-cut.sh` |
+| 3 | `detect_cut` | Finds the start of the show. Rerun only if the transcript is newer (new audio) or `-c` is given, so a cut set by hand is kept | `detect-cut.sh` |
 | 4 | `crop` | Cuts at the offset. In test mode it uses a fast stream copy | `ffmpeg -i raw -ss <cut> cropped` |
 | 5 | `shift_to_podcast_timeline` | Shifts the transcript by `−cut` and renders the text version | `jq` (`transcript.sh`) |
-| 6 | `preview` | Prints the cut and its evidence and plays the crop in Quick Look. `y` continues; a number re-crops at that offset (method `manual`); anything else cleans up and exits | `qlmanage -p` |
+| 6 | `preview` | Prints the cut and its evidence and plays the crop (or the reused final mp3) in Quick Look. `y` continues; a number re-crops at that offset (method `manual`); anything else cleans up and exits | `qlmanage -p` |
 | 7 | `add_compression` | Dynamic-range compression. Skipped in test mode | `ffmpeg -af acompressor` |
 | 8 | `add_metadata` | Embeds the cover and tags: title from `stream-<ep>.json` (else `Live <ep>`), artist `Cowsay Show`, genre `Podcast`, year | `ffmpeg -map 0 -map 1 -metadata … -c copy` |
 | 9 | `r2_upload` | Only with `-u`. Picks the file name (`cow<ep>.mp3`, or `cow<ep>-rev<n>.mp3` for a fix; skips the upload if the same audio is already there), uploads it, checks that the public URL answers HTTP 200, logs it in `r2-uploads.log`, and patches the existing post if there is one. See 2.4 | `rclone copyto`, `curl -I` |
 | 10 | `clean` | Deletes the cropped and compressed files. Skipped in test mode | `rm -f` |
 
-Stages 4, 7 and 8 rebuild only when their output is missing, older than their input, or `-r` is given. A new cut point therefore re-crops automatically. Every `ffmpeg` call uses `-nostdin`, so it never swallows your answers to the prompts.
+Stages 4, 7 and 8 are skipped when `cow<ep>.mp3` is up to date: it's newer than `raw<ep>.mp3` and the cover, and `cow<ep>.mp3.build` matches the current cut, mode, title and year. Otherwise, or with `-r`, all three run. So a rerun doesn't re-encode the audio, while a new cut (detected, or typed at the preview) or a renamed stream rebuilds it. The cropped and compressed files are still deleted at the end; they're only needed during a build. A rebuild from the same inputs is byte-identical, so `r2_upload` sees the same md5 and doesn't upload a new revision. Every `ffmpeg` call uses `-nostdin`, so it never swallows your answers to the prompts.
 
 ---
 
@@ -612,6 +627,8 @@ The Podigee player shows the chapters (Octopod reads `chapter[0..12]` as the sta
 | 5 | Build the site into `$SITE_DIR` | `bundle exec octopod b` |
 | 6 | Deploy: commit and push `_site` to `$SITE_REPO`, which Cloudflare Pages deploys | `git -C $SITE_DIR add -A`, `commit`, `push` |
 | 7 | Open the live site, then commit and push the site sources | `open`, `git add .`, `commit`, `push` |
+
+**Nothing to publish.** Before step 3 it checks whether there is anything to deploy: no uncommitted changes in the site sources, and `$SITE_DIR` committed and pushed. Then the episode is already live, so it skips the preview, the build and the `site` gate; it only pushes the site sources if they have unpushed commits, and exits 0. `PUBLISH_FORCE=1 ./publish.sh <ep>` builds anyway.
 
 The preview server keeps running until you answer, so the page can be browsed. It's also stopped when the script ends any other way (an `EXIT` trap). `set -x` is on only with `-v`.
 

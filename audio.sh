@@ -3,7 +3,12 @@
 # Prepare the episode audio: get the raw recording, transcribe it, detect the intro cut,
 # crop, compress, tag, and optionally upload to Cloudflare R2.
 #
-# Usage: ./audio.sh -e <episode> (-l <mp3> | -y <youtube_url>) [-u] [-t] [-r] [-v]
+# Usage: ./audio.sh -e <episode> (-l <mp3> | -y <youtube_url>) [-u] [-t] [-r] [-c] [-v]
+#   -r  rebuild the raw copy and the final mp3 (the cut is kept)
+#   -c  detect the cut again, replacing one set by hand
+#
+# The final mp3 is reused on a rerun when it was built from the same raw audio, cut, mode and tags
+# (its recipe is saved in cow<ep>.mp3.build), so a rerun doesn't crop and compress again.
 
 SCRIPTS_DIR="${0:A:h}"
 
@@ -59,18 +64,17 @@ youtube_download() {
     yt-dlp -x --audio-format mp3 "$YOUTUBE_URL" -o "$RAW" >> "$LOG" 2>&1
 }
 
-# needs_build <target> <source>: true if target is missing, older than source, or -r was given
-needs_build() {
-    [ "$REWRITE" = true ] || [ ! -f "$1" ] || [[ "$2" -nt "$1" ]]
-}
-
 transcribe_raw() {
     "$SCRIPTS_DIR/transcribe.sh" -e "$EPISODE_NUMBER" -i "$RAW" -o "$RAW_TRANSCRIPT" ${VERBOSE_FLAG[@]}
 }
 
+# The cut is detected once per audio: again only when the transcript is newer (new audio) or with -c.
+# -r keeps it, so a cut set by hand survives a rebuild.
 detect_cut() {
-    if needs_build "$CUT_FILE" "$RAW_TRANSCRIPT"; then
+    if [ "$REDETECT_CUT" = true ] || [ ! -f "$CUT_FILE" ] || [[ "$RAW_TRANSCRIPT" -nt "$CUT_FILE" ]]; then
         "$SCRIPTS_DIR/detect-cut.sh" -e "$EPISODE_NUMBER" ${VERBOSE_FLAG[@]}
+    elif [ "$(cut -f1 "$CUT_INFO" 2>/dev/null || true)" = manual ]; then
+        print_message "Using the cut set by hand in $CUT_FILE (-c detects it again)"
     else
         print_message "Using the existing cut point from $CUT_FILE"
     fi
@@ -87,13 +91,35 @@ read_cut() {
     fi
 }
 
+# tag_values: sets TITLE and YEAR for the mp3 tags, from stream-<ep>.json
+tag_values() {
+    local streamed=""
+    TITLE="Live $EPISODE_NUMBER"
+    YEAR=$(date +%Y)
+    if [ -s "$STREAM_FILE" ]; then
+        TITLE=$(jq -r '.title' "$STREAM_FILE")
+        streamed=$(jq -r '.date // empty' "$STREAM_FILE")
+        [ -n "$streamed" ] && YEAR="${streamed[1,4]}"    # the year it was streamed, for old episodes
+    fi
+    return 0
+}
+
+# final_recipe: everything the final mp3 is built from, besides the raw audio and the cover (checked by date)
+final_recipe() {
+    tag_values
+    print -rl -- "cut $CUT" "mode $([ "$TESTRUN" = true ] && echo test || echo full)" "title $TITLE" "year $YEAR"
+}
+
+# final_up_to_date: the final mp3 was built from the current raw audio, cover, cut and tags
+final_up_to_date() {
+    [ "$REWRITE" = false ] && [ -f "$FINAL" ] && [ -f "$FINAL_RECIPE" ] \
+        && [[ ! "$RAW" -nt "$FINAL" ]] && [[ ! "$COVER" -nt "$FINAL" ]] \
+        && [ "$(< "$FINAL_RECIPE")" = "$(final_recipe)" ]
+}
+
 crop() {
     CUT=$(read_cut)
-
-    if ! needs_build "$CROPPED" "$CUT_FILE"; then
-        print_message "CROPPED file already exists"
-        return 0
-    fi
+    PREVIEW_FILE="$CROPPED"
     rm -f "$CROPPED"
 
     check_ffmpeg
@@ -143,8 +169,8 @@ preview() {
         method=$(cut -f1 "$CUT_INFO" 2>/dev/null || echo "existing")
         evidence=$(cut -f2- "$CUT_INFO" 2>/dev/null || echo "")
         print_message "Intro cut at $(jq -rn "$JQ_TIME"" $CUT | hmsms") ($method) $evidence"
-        print_message "Opening the cropped file. Close the preview, then answer."
-        qlmanage -p "$CROPPED" >> "$LOG" 2>&1
+        print_message "Opening ${PREVIEW_FILE:t}. Close the preview, then answer."
+        qlmanage -p "$PREVIEW_FILE" >> "$LOG" 2>&1
         print_message "Do you want to proceed with this variant? y / [n] / <seconds> to set the cut manually"
         read answer
 
@@ -165,10 +191,6 @@ preview() {
 }
 
 add_compression() {
-    if ! needs_build "$COMPRESSED" "$CROPPED"; then
-        print_message "COMPRESSED file already exists"
-        return 0
-    fi
     rm -f "$COMPRESSED"
 
     check_ffmpeg
@@ -177,27 +199,17 @@ add_compression() {
 }
 
 add_metadata() {
-    if ! needs_build "$FINAL" "$COMPRESSED"; then
-        print_message "FINAL file already exists"
-        return 0
-    fi
-    rm -f "$FINAL"
+    rm -f "$FINAL" "$FINAL_RECIPE"
 
     check_ffmpeg
     print_message "Adding metadata to the mp3 file"
 
-    TITLE="Live $EPISODE_NUMBER"
-    if [ -s "stream-$EPISODE_NUMBER.json" ]; then
-        TITLE=$(jq -r '.title' "stream-$EPISODE_NUMBER.json")
-    fi
+    tag_values
     ARTIST="Cowsay Show"
-    YEAR=$(date +%Y)
-    if [ -s "stream-$EPISODE_NUMBER.json" ] && [ -n "$(jq -r '.date // empty' "stream-$EPISODE_NUMBER.json")" ]; then
-        YEAR=$(jq -r '.date[0:4]' "stream-$EPISODE_NUMBER.json")    # the year it was streamed, for old episodes
-    fi
     GENRE="Podcast"
 
     ffmpeg -nostdin -y -i "$COMPRESSED" -i "$COVER" -map 0 -map 1 -metadata title="$TITLE" -metadata artist="$ARTIST" -metadata genre="$GENRE" -metadata year="$YEAR" -c copy "$FINAL" >> "$LOG" 2>&1
+    final_recipe > "$FINAL_RECIPE"
 }
 
 clean() {
@@ -283,11 +295,12 @@ YOUTUBE_URL=""
 UPLOAD=false
 TESTRUN=false
 REWRITE=false
+REDETECT_CUT=false
 VERBOSE_FLAG=()
 
 # Read Arguments
 
-while getopts ":e:y:l:utrv" opt; do
+while getopts ":e:y:l:utrcv" opt; do
     case ${opt} in
         e )
             EPISODE_NUMBER=$OPTARG
@@ -307,16 +320,19 @@ while getopts ":e:y:l:utrv" opt; do
         r )
             REWRITE=true
             ;;
+        c )
+            REDETECT_CUT=true
+            ;;
         v )
             VERBOSE_FLAG=(-v)
             set -x
             ;;
         \? )
-            echo "Invalid option: -$OPTARG (-e -y/-l [-u] [-t] [-r] [-v])" >&2
+            echo "Invalid option: -$OPTARG (-e -y/-l [-u] [-t] [-r] [-c] [-v])" >&2
             exit 1
             ;;
         : )
-            echo "Option -$OPTARG requires an argument (-e -y/-l [-u] [-t] [-r] [-v])" >&2
+            echo "Option -$OPTARG requires an argument (-e -y/-l [-u] [-t] [-r] [-c] [-v])" >&2
             exit 1
             ;;
     esac
@@ -332,6 +348,8 @@ RAW="raw$EPISODE_NUMBER.mp3"
 CROPPED="cropped$EPISODE_NUMBER.mp3"
 COMPRESSED="compressed$EPISODE_NUMBER.mp3"
 FINAL="cow$EPISODE_NUMBER.mp3"
+FINAL_RECIPE="$FINAL.build"
+STREAM_FILE="stream-$EPISODE_NUMBER.json"
 RAW_TRANSCRIPT="transcript-$EPISODE_NUMBER.raw.json"
 TRANSCRIPT="transcript-$EPISODE_NUMBER.json"
 TRANSCRIPT_TXT="transcript-$EPISODE_NUMBER.txt"
@@ -343,18 +361,25 @@ prepare_dir "$EPISODE_NUMBER"
 prepare_raw
 transcribe_raw
 detect_cut
-crop
+CUT=$(read_cut)
+if final_up_to_date; then
+    print_message "$FINAL is already built from this audio and cut, reusing it"
+    PREVIEW_FILE="$FINAL"
+else
+    crop
+fi
 shift_to_podcast_timeline
 preview
 
-if [ "$TESTRUN" = false ]; then
-    add_compression
-else
-    print_message "No compression on test run"
-    COMPRESSED="$CROPPED"
+if ! final_up_to_date; then    # also after a new cut set at the preview
+    if [ "$TESTRUN" = false ]; then
+        add_compression
+    else
+        print_message "No compression on test run"
+        COMPRESSED="$CROPPED"
+    fi
+    add_metadata
 fi
-
-add_metadata
 
 if [ "$UPLOAD" = "false" ]; then
     print_success "The script has finished successfuly without file upload 🐮."

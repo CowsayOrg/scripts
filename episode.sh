@@ -2,8 +2,16 @@
 
 # Run the whole post-show pipeline for one episode, or for every unpublished one.
 #
-# Usage: ./episode.sh -e <number> [-n <title>] [-l <file> | -y <youtube_url>] [-u] [-t] [-r] [-v]
-#        ./episode.sh -a [-u] [-t] [-r] [-v]
+# Usage: ./episode.sh -e <number> [-n <title>] [-l <file> | -y <youtube_url>] [-u] [-t] [-r <steps>] [-v]
+#        ./episode.sh -a [-u] [-t] [-r <steps>] [-v]
+#
+# Everything already built is reused on a rerun. -r <steps> redoes only those steps, comma separated:
+#   stream  look the YouTube stream up again (stream.sh -r)
+#   audio   rebuild the raw copy and the final mp3, keeping the cut (audio.sh -r)
+#   cut     detect the intro cut again, replacing one set by hand (audio.sh -c)
+#   topics  fetch the Trello cards and place the topics again: an LLM call (topics.sh -r)
+#   align   measure the YouTube offset again (yt-align.sh -r)
+#   all     all of them except cut (all,cut for that too)
 #
 # With -e, the title and the YouTube stream are looked up on the channel (stream.sh) and the
 # recording is found on disk (find-audio.sh) or downloaded from the stream. -n, -l and -y override them.
@@ -19,7 +27,7 @@ cd "${0:A:h}"
 
 set -euo pipefail
 
-USAGE="-e <number> [-n <title>] [-l <file> | -y <url>] [-u] [-t] [-r] [-v]  or  -a [-u] [-t] [-r] [-v]"
+USAGE="-e <number> [-n <title>] [-l <file> | -y <url>] [-u] [-t] [-r <steps>] [-v]  or  -a [-u] [-t] [-r <steps>] [-v]"
 
 usage_error() {
     print_error "$1"
@@ -33,22 +41,21 @@ ALL=false
 EPISODE_TITLE=""
 YOUTUBE_URL=""
 FILE_SOURCE=""
-AUDIO_FLAGS=()     # only for audio.sh: -u -t
-COMMON_FLAGS=()    # for audio.sh, topics.sh, stream.sh: -r -v
-VERBOSE_FLAG=()    # for format.sh and publish.sh: -v
+UPLOAD_TEST_FLAGS=()    # only for audio.sh: -u -t
+REDO=""            # -r <steps>
+VERBOSE_FLAG=()    # for every step: -v
 
-while getopts ":e:an:y:l:utrv" opt; do
+while getopts ":e:an:y:l:utr:v" opt; do
   case ${opt} in
     e ) EPISODE_NUMBER=$OPTARG ;;
     a ) ALL=true ;;
     y ) YOUTUBE_URL=$OPTARG ;;
     n ) EPISODE_TITLE=$OPTARG ;;
     l ) FILE_SOURCE=${OPTARG:A} ;;
-    u ) AUDIO_FLAGS+=(-u) ;;
-    t ) AUDIO_FLAGS+=(-t) ;;
-    r ) COMMON_FLAGS+=(-r) ;;
+    u ) UPLOAD_TEST_FLAGS+=(-u) ;;
+    t ) UPLOAD_TEST_FLAGS+=(-t) ;;
+    r ) REDO=$OPTARG ;;
     v )
-      COMMON_FLAGS+=(-v)
       VERBOSE_FLAG=(-v)
       set -x
       ;;
@@ -66,6 +73,30 @@ fi
 if [ -n "$FILE_SOURCE" ] && [ -n "$YOUTUBE_URL" ]; then
     usage_error "Give either -l or -y, not both"
 fi
+
+REDO_STEPS=(${(s:,:)REDO})
+for step in "${REDO_STEPS[@]}"; do
+    case $step in
+        stream|audio|cut|topics|align|all ) ;;
+        * ) usage_error "Unknown step for -r: $step (stream, audio, cut, topics, align or all)" ;;
+    esac
+done
+
+# redo <step>: true if -r asked for this step (all covers everything but the cut)
+redo() {
+    if (( ${REDO_STEPS[(Ie)$1]} )); then return 0; fi
+    [ "$1" != cut ] && (( ${REDO_STEPS[(Ie)all]} ))
+}
+
+STREAM_FLAGS=("${VERBOSE_FLAG[@]}")
+AUDIO_FLAGS=("${UPLOAD_TEST_FLAGS[@]}" "${VERBOSE_FLAG[@]}")
+TOPICS_FLAGS=("${VERBOSE_FLAG[@]}")
+ALIGN_FLAGS=("${VERBOSE_FLAG[@]}")
+if redo stream; then STREAM_FLAGS+=(-r); fi
+if redo audio;  then AUDIO_FLAGS+=(-r); fi
+if redo cut;    then AUDIO_FLAGS+=(-c); fi
+if redo topics; then TOPICS_FLAGS+=(-r); fi
+if redo align;  then ALIGN_FLAGS+=(-r); fi
 
 ##################################################################################
 # -a: run every unpublished episode, oldest first
@@ -101,7 +132,7 @@ if [ "$ALL" = true ]; then
     DONE=(); STOPPED=(); FAILED=()
     for ep in "${SELECTED[@]}"; do
         print_message "=== Episode $ep ==="
-        if "./$SCRIPT_NAME" -e "$ep" "${AUDIO_FLAGS[@]}" "${COMMON_FLAGS[@]}"; then
+        if "./$SCRIPT_NAME" -e "$ep" ${UPLOAD_TEST_FLAGS[@]} ${REDO:+-r} ${REDO:+"$REDO"} ${VERBOSE_FLAG[@]}; then
             DONE+=("$ep")
         elif [ $? -eq $NEEDS_REVIEW ]; then
             STOPPED+=("$ep")
@@ -123,7 +154,7 @@ EPISODE_DIR="$COWSAY_DIR/$EPISODE_NUMBER"
 STREAM_FILE="$EPISODE_DIR/stream-$EPISODE_NUMBER.json"
 
 # 0. Title and source: from the arguments, otherwise from the YouTube stream and the disk
-if ! ./stream.sh -e "$EPISODE_NUMBER" "${COMMON_FLAGS[@]}"; then
+if ! ./stream.sh -e "$EPISODE_NUMBER" "${STREAM_FLAGS[@]}"; then
     if [ -z "$EPISODE_TITLE" ] || [ -z "$FILE_SOURCE$YOUTUBE_URL" ]; then
         exit 1
     fi
@@ -145,20 +176,23 @@ print_message "Episode $EPISODE_NUMBER: \"$EPISODE_TITLE\", source: ${FILE_SOURC
 
 # 1. Audio: raw -> transcript -> intro cut -> crop -> compress -> tag -> R2
 if [ -n "$FILE_SOURCE" ]; then
-    ./audio.sh -e "$EPISODE_NUMBER" -l "$FILE_SOURCE" "${AUDIO_FLAGS[@]}" "${COMMON_FLAGS[@]}"
+    ./audio.sh -e "$EPISODE_NUMBER" -l "$FILE_SOURCE" "${AUDIO_FLAGS[@]}"
 else
-    ./audio.sh -e "$EPISODE_NUMBER" -y "$YOUTUBE_URL" "${AUDIO_FLAGS[@]}" "${COMMON_FLAGS[@]}"
+    ./audio.sh -e "$EPISODE_NUMBER" -y "$YOUTUBE_URL" "${AUDIO_FLAGS[@]}"
 fi
 
 # 2. Topics: transcript + Trello cards and their links -> Records-<ep>.csv
-if ! ./trello.sh -e "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"; then
-    print_error "No Trello topics for episode $EPISODE_NUMBER, the topics will have no links (run ./trello.sh -e $EPISODE_NUMBER -l \"<list name>\" and then this again with -r)"
-fi
-./topics.sh -e "$EPISODE_NUMBER" "${COMMON_FLAGS[@]}"
-
-# 3. Review the topics before they go into the show notes
 REVIEW_FILE="$EPISODE_DIR/topics-$EPISODE_NUMBER.review.txt"
 RECORDS_FILE="$EPISODE_DIR/Records-$EPISODE_NUMBER.csv"
+
+if [ -f "$RECORDS_FILE" ] && ! redo topics; then
+    print_message "Topics already placed in ${RECORDS_FILE:t}, not fetching the Trello cards again (-r topics does)"
+elif ! ./trello.sh -e "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"; then
+    print_error "No Trello topics for episode $EPISODE_NUMBER, the topics will have no links (run ./trello.sh -e $EPISODE_NUMBER -l \"<list name>\" and then this again with -r topics)"
+fi
+./topics.sh -e "$EPISODE_NUMBER" "${TOPICS_FLAGS[@]}"
+
+# 3. Review the topics before they go into the show notes
 
 if ! { headless && approved topics; }; then    # an approved headless run doesn't print them again
     if [ -f "$REVIEW_FILE" ] && [ ! "$RECORDS_FILE" -nt "$REVIEW_FILE" ]; then    # Records edited by hand: show it
@@ -178,13 +212,13 @@ else
         print_message "Edit and save the file, then press Enter to continue"
         read
     elif [ "$ANSWER" != "y" ]; then
-        print_error "Not using these topics. Run again with -r to regenerate them, or edit $RECORDS_FILE"
+        print_error "Not using these topics. Run again with -r topics to regenerate them, or edit $RECORDS_FILE"
         exit $NEEDS_REVIEW
     fi
 fi
 
 # 4. Where the YouTube video starts against the raw audio, for its timestamps and captions
-./yt-align.sh -e "$EPISODE_NUMBER" "${COMMON_FLAGS[@]}"
+./yt-align.sh -e "$EPISODE_NUMBER" "${ALIGN_FLAGS[@]}"
 
 # 5. Show notes, chapters, post, publish
 ./format.sh "$EPISODE_NUMBER" "${VERBOSE_FLAG[@]}"

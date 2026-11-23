@@ -64,6 +64,19 @@ if ! git -C "$SITE_DIR" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     exit 1
 fi
 
+# Nothing to deploy: the site sources are all committed and the built site is committed and pushed.
+# Then the post is already live, so skip the preview and the build. PUBLISH_FORCE=1 builds anyway.
+ahead() { git -C "$1" rev-list --count '@{u}..HEAD' 2> /dev/null || echo 0; }
+if [ "${PUBLISH_FORCE:-0}" != 1 ] && [ -z "$(git status --porcelain)" ] \
+    && [ -z "$(git -C "$SITE_DIR" status --porcelain)" ] && [ "$(ahead "$SITE_DIR")" = 0 ]; then
+    print_message "The site sources have no changes since the last publish, skipping the preview and the build (PUBLISH_FORCE=1 builds anyway)"
+    if [ "$(ahead .)" != 0 ]; then
+        git push > "$LOG" 2>&1
+        print_success "The site sources are pushed to Github 🐮"
+    fi
+    exit 0
+fi
+
 if headless; then
     # No preview server and no browser: show the post, build only once approved
     POST=$(ls "$COWSAY_SOURCE"*-"$1".md 2> /dev/null | tail -1)
