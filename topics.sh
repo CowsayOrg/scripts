@@ -12,6 +12,7 @@
 #                            the old trello_cards_<ep>.ssv is read too)
 # Outputs:
 #   Records-<ep>.csv         "HH:MM:SS.mmm","Title","link1 link2" rows, Intro first and Outro last
+#   Records-<ep>.cut         the cut these times are based on (audio.sh moves them when the cut changes)
 #   topics-<ep>.llm.json     raw LLM answer
 #   topics-<ep>.review.txt   readable summary for the review step
 #
@@ -144,6 +145,7 @@ jq -r "$JQ_TIME"'
        + [ [ (.outro_seconds | hmsms), "Outro" ] ])
     | .[] | @csv
 ' "$TIMED" > "$RECORDS"
+jq -r '.offset // 0' "$TRANSCRIPT_JSON" > "Records-$EPISODE_NUMBER.cut"
 
 # Review summary
 {

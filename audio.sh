@@ -3,9 +3,14 @@
 # Prepare the episode audio: get the raw recording, transcribe it, detect the intro cut,
 # crop, compress, tag, and optionally upload to Cloudflare R2.
 #
-# Usage: ./audio.sh -e <episode> (-l <mp3> | -y <youtube_url>) [-u] [-t] [-r] [-c] [-v]
+# Usage: ./audio.sh -e <episode> (-l <mp3> | -y <youtube_url>) [-u] [-t] [-r] [-c] [-p] [-v]
 #   -r  rebuild the raw copy and the final mp3 (the cut is kept)
 #   -c  detect the cut again, replacing one set by hand
+#   -p  headless, cut not approved yet: shift the transcript, print the cut review and exit $CUT_PENDING
+#       without building anything, so episode.sh can place the topics and ask about both at once
+#
+# When the cut changes, an existing Records-<ep>.csv is moved with it (its times are podcast time),
+# so the topics don't have to be placed again. Records-<ep>.cut holds the cut its times are based on.
 #
 # The final mp3 is reused on a rerun when it was built from the same raw audio, cut, mode and tags
 # (its recipe is saved in cow<ep>.mp3.build), so a rerun doesn't crop and compress again.
@@ -130,12 +135,39 @@ crop() {
         print_message "Cutting the intro at $CUT s"
         ffmpeg -nostdin -y -i "$RAW" -ss "$CUT" "$CROPPED" >> "$LOG" 2>&1
     fi
+    CROPPED_CUT="$CUT"
 }
 
 # Shift the raw transcript onto the podcast timeline (the crop is a plain offset)
 shift_to_podcast_timeline() {
+    local before=""
+    [ -f "$RECORDS" ] && [ ! -f "$RECORDS_CUT" ] && [ -f "$TRANSCRIPT" ] \
+        && before=$(jq -r '.offset // empty' "$TRANSCRIPT")    # Records placed before Records-<ep>.cut existed
     shift_transcript "$RAW_TRANSCRIPT" "$TRANSCRIPT" "$CUT"
     transcript_to_text "$TRANSCRIPT" "$TRANSCRIPT_TXT"
+    [ -n "$before" ] && print -r -- "$before" > "$RECORDS_CUT"
+    move_records
+}
+
+# move_records: a new cut moves the podcast timeline, so move the topic times by the difference
+move_records() {
+    local base
+    [ -f "$RECORDS" ] && [ -f "$RECORDS_CUT" ] || return 0
+    base=$(< "$RECORDS_CUT")
+    (( base == CUT )) && return 0
+    awk -v d="$(( base - CUT ))" '
+        function secs(t) { split(t, p, ":"); return p[1] * 3600 + p[2] * 60 + p[3] }
+        function hms(s) { s = int(s * 1000 + 0.5); return sprintf("%02d:%02d:%02d.%03d", int(s / 3600000), int(s % 3600000 / 60000), int(s % 60000 / 1000), s % 1000) }
+        match($0, /^"[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9]",/) && substr($0, 16, 7) != "\"Intro\"" \
+            && substr($0, 16, 5) != "\"cut\"" && substr($0, 16, 8) != "\"moment\"" {
+            t = secs(substr($0, 2, 12)) + d
+            if (t < 0) t = 0
+            $0 = "\"" hms(t) "\"" substr($0, 15)
+        }
+        { print }
+    ' "$RECORDS" > "$RECORDS.tmp" && mv "$RECORDS.tmp" "$RECORDS"
+    print -r -- "$CUT" > "$RECORDS_CUT"
+    print_message "The cut moved by $(printf %.3f $(( CUT - base ))) s: moved the topic times in $RECORDS to match"
 }
 
 # Headless preview: the transcript around the cut instead of playing the audio.
@@ -146,7 +178,7 @@ preview_headless() {
         if [ "$COWSAY_CUT" != "$CUT" ]; then
             print -r -- "$COWSAY_CUT" > "$CUT_FILE"
             print -r -- "manual"$'\t'"set with COWSAY_CUT" > "$CUT_INFO"
-            crop
+            CUT="$COWSAY_CUT"
             shift_to_podcast_timeline
         fi
         print_message "Intro cut set by hand at $CUT s"
@@ -158,6 +190,10 @@ preview_headless() {
         jq -r --argjson c "$CUT" "$JQ_TIME"'
             .segments[] | select(.start > $c - 25 and .start < $c + 25)
             | "\(if .start >= $c then ">>" else "  " end) \(.start | hms) \(.speaker // "") \(.text[0:110])"' "$RAW_TRANSCRIPT"
+    fi
+    if ! approved cut && [ "$DEFER_CUT_REVIEW" = true ]; then
+        print_message "The cut isn't approved yet: nothing built, the transcript is ready for the topics"
+        exit $CUT_PENDING
     fi
     gate cut "the intro cut; or set COWSAY_CUT=<seconds>"
 }
@@ -296,11 +332,12 @@ UPLOAD=false
 TESTRUN=false
 REWRITE=false
 REDETECT_CUT=false
+DEFER_CUT_REVIEW=false
 VERBOSE_FLAG=()
 
 # Read Arguments
 
-while getopts ":e:y:l:utrcv" opt; do
+while getopts ":e:y:l:utrcpv" opt; do
     case ${opt} in
         e )
             EPISODE_NUMBER=$OPTARG
@@ -323,16 +360,19 @@ while getopts ":e:y:l:utrcv" opt; do
         c )
             REDETECT_CUT=true
             ;;
+        p )
+            DEFER_CUT_REVIEW=true
+            ;;
         v )
             VERBOSE_FLAG=(-v)
             set -x
             ;;
         \? )
-            echo "Invalid option: -$OPTARG (-e -y/-l [-u] [-t] [-r] [-c] [-v])" >&2
+            echo "Invalid option: -$OPTARG (-e -y/-l [-u] [-t] [-r] [-c] [-p] [-v])" >&2
             exit 1
             ;;
         : )
-            echo "Option -$OPTARG requires an argument (-e -y/-l [-u] [-t] [-r] [-c] [-v])" >&2
+            echo "Option -$OPTARG requires an argument (-e -y/-l [-u] [-t] [-r] [-c] [-p] [-v])" >&2
             exit 1
             ;;
     esac
@@ -355,6 +395,9 @@ TRANSCRIPT="transcript-$EPISODE_NUMBER.json"
 TRANSCRIPT_TXT="transcript-$EPISODE_NUMBER.txt"
 CUT_FILE="cut-$EPISODE_NUMBER.txt"
 CUT_INFO="cut-$EPISODE_NUMBER.info"
+RECORDS="Records-$EPISODE_NUMBER.csv"
+RECORDS_CUT="Records-$EPISODE_NUMBER.cut"
+CROPPED_CUT=""
 
 prepare_dir "$EPISODE_NUMBER"
 
@@ -365,13 +408,14 @@ CUT=$(read_cut)
 if final_up_to_date; then
     print_message "$FINAL is already built from this audio and cut, reusing it"
     PREVIEW_FILE="$FINAL"
-else
-    crop
+elif ! headless; then
+    crop    # for Quick Look; the headless review shows transcript lines, so it crops once the cut is approved
 fi
 shift_to_podcast_timeline
 preview
 
 if ! final_up_to_date; then    # also after a new cut set at the preview
+    [ "$CROPPED_CUT" = "$CUT" ] || crop
     if [ "$TESTRUN" = false ]; then
         add_compression
     else

@@ -244,10 +244,14 @@ Watch the console. Three steps stop and wait for you:
 
 | Gate | Instead of | Shows |
 |------|------------|-------|
-| `cut` (`audio.sh`) | Quick Look on the crop | the raw transcript lines around the cut; `COWSAY_CUT=<seconds>` sets it by hand |
-| `topics` (`episode.sh`) | the y/n/e prompt | the review list (or `Records-<ep>.csv` if it was edited after it) |
+| `cut` (`audio.sh`) | Quick Look on the crop | the raw transcript lines around the cut; `COWSAY_CUT=<seconds>` sets it by hand (and counts as approved) |
+| `topics` (`episode.sh`) | the y/n/e prompt | the review list (or time, title and link count from `Records-<ep>.csv` if it was edited or moved after it) |
 | `site` (`publish.sh`) | the local server and the browser | the post's title, date and mp3, and the uncommitted site source changes |
 | `youtube` (`youtube-update.sh`), `backfill` (`youtube-backfill.sh`) | the y/n prompt | the diff / the missing videos |
+
+**Cut and topics in one stop.** `episode.sh` runs `audio.sh -p` when headless: an unapproved cut doesn't stop the audio step. The transcript is shifted with the proposed cut, nothing is cropped, built or uploaded, and `audio.sh` exits 4 (`CUT_PENDING`). `episode.sh` then places the topics and stops once with `NEEDS_REVIEW: cut,topics`. If the cut is then changed with `COWSAY_CUT`, the topic times in `Records-<ep>.csv` move by the difference (5.2), so the topics aren't placed again. The audio is cropped once, after the cut is approved.
+
+`./status.sh <ep>...` tells where an episode stands from its files alone (5.1.4), without running anything.
 
 `episode.sh -a` takes its answer from `COWSAY_EPISODES` (`y` or the numbers). The Claude Code skill `.claude/skills/cowsay-episode/` drives the pipeline this way through `run.sh`, which keeps the full output in `$COWSAY_DIR/<ep>/headless.log` and prints only the useful lines.
 
@@ -360,6 +364,14 @@ Prints, one per line and oldest first, the episodes streamed on YouTube that are
 
 The feed only holds the latest 20 episodes, so only streams newer than the oldest one in it are considered. Episodes streamed but never published inside that window also show up; for example, 156, 157, 160, 161 and 167 at the time of writing. Answer with only the numbers you want at the `-a` prompt.
 
+### 5.1.4 `status.sh`: where an episode stands
+
+```bash
+./status.sh <episode> [<episode>...]
+```
+
+Read-only: no network, no YouTube quota, nothing built. For each episode it prints one line per stage, from the files in `$COWSAY_DIR/<ep>/`, the R2 log and the site sources' git state: the stream, the raw audio, the transcript (provider), the cut (method), the mp3 (and whether it's stale against the cut), R2 (whether the uploaded file is this mp3), the topics (and whether they still have to move with the cut), the post (written, committed, pushed) and the YouTube offset. The last line is the next step. For a published episode (post committed and pushed), only a changed mp3 is a next step; files missing from before the current pipeline are not. YouTube itself isn't checked; `youtube-update.sh -e <ep> -n` does that, for about 50 quota units.
+
 ---
 
 ### 5.2 `audio.sh`: audio builder and uploader
@@ -369,7 +381,7 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 **Usage**
 
 ```bash
-./audio.sh -e <number> (-l <path> | -y <url>) [-u] [-t] [-r] [-c] [-v]
+./audio.sh -e <number> (-l <path> | -y <url>) [-u] [-t] [-r] [-c] [-p] [-v]
 ```
 
 | Flag | Argument | Required | Description |
@@ -381,6 +393,7 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 | `-t` | – | no | Test run. Fast stream-copy crop, no compression, no cleanup |
 | `-r` | – | no | Rebuild the raw copy and the final mp3 (crop, compression and tags). The cut is kept |
 | `-c` | – | no | Detect the cut again, replacing one set by hand |
+| `-p` | – | no | Headless only: an unapproved cut doesn't stop the run. The transcript is shifted, the cut review printed, nothing built; exits 4 (`CUT_PENDING`). Used by `episode.sh` |
 | `-v` | – | no | Verbose (`set -x`), also passed to `transcribe.sh` and `detect-cut.sh` |
 
 **Files** (in `$COWSAY_DIR/<ep>/`)
@@ -403,8 +416,8 @@ Produces the final tagged mp3, the transcripts and the cut offset, and optionall
 | 1 | `prepare_raw` | Copies `-l` or downloads `-y` into `raw<ep>.mp3`. Skipped if it exists, unless `-r` is given | `cp` / `yt-dlp -x --audio-format mp3` |
 | 2 | `transcribe_raw` | Transcribes the raw audio. Cached by audio md5 | `transcribe.sh` |
 | 3 | `detect_cut` | Finds the start of the show. Rerun only if the transcript is newer (new audio) or `-c` is given, so a cut set by hand is kept | `detect-cut.sh` |
-| 4 | `crop` | Cuts at the offset. In test mode it uses a fast stream copy | `ffmpeg -i raw -ss <cut> cropped` |
-| 5 | `shift_to_podcast_timeline` | Shifts the transcript by `−cut` and renders the text version | `jq` (`transcript.sh`) |
+| 4 | `crop` | Cuts at the offset. In test mode it uses a fast stream copy. Headless, it waits until the cut is approved (the review shows transcript lines, not the audio), so it runs once | `ffmpeg -i raw -ss <cut> cropped` |
+| 5 | `shift_to_podcast_timeline` | Shifts the transcript by `−cut` and renders the text version. If `Records-<ep>.csv` exists and was placed with another cut (`Records-<ep>.cut`), moves its times by the difference (Intro stays at 0) | `jq` (`transcript.sh`), `awk` |
 | 6 | `preview` | Prints the cut and its evidence and plays the crop (or the reused final mp3) in Quick Look. `y` continues; a number re-crops at that offset (method `manual`); anything else cleans up and exits | `qlmanage -p` |
 | 7 | `add_compression` | Dynamic-range compression. Skipped in test mode | `ffmpeg -af acompressor` |
 | 8 | `add_metadata` | Embeds the cover and tags: title from `stream-<ep>.json` (else `Live <ep>`), artist `Cowsay Show`, genre `Podcast`, year | `ffmpeg -map 0 -map 1 -metadata … -c copy` |
@@ -530,6 +543,7 @@ An existing `Records-<ep>.csv`, for example a manual export, is kept unless `-r`
 | File | Content |
 |------|---------|
 | `Records-<ep>.csv` | Same format as the old Records app export: `"HH:MM:SS.mmm","Title"[,"link1 link2 …"]` (links separated by spaces), with Intro at `00:00:00.000` first, topics in time order and Outro last |
+| `Records-<ep>.cut` | The cut the times are based on (the transcript's offset). `audio.sh` moves the times when the cut changes |
 | `topics-<ep>.review.txt` | Readable summary for the review step: each topic with its card and number of links, and the cards not discussed |
 | `topics-<ep>.llm.json`, `topics-<ep>.timed.json` | Claude's raw answer and the refined times |
 
@@ -747,7 +761,9 @@ All files below are in `$COWSAY_DIR/<ep>/`, except the post copy, which goes to 
 | `cropped<ep>.mp3`, `compressed<ep>.mp3` | `audio.sh` | `audio.sh` (deleted by `clean`) |
 | `cow<ep>.mp3` | `audio.sh` | R2 (as `cow<ep>.mp3` or `cow<ep>-rev<n>.mp3`), `template-md.sh` |
 | `$COWSAY_DIR/r2-uploads.log` (all episodes) | `audio.sh -u`, `r2-uploads.sh` | `template-md.sh`, `r2-uploads.sh` |
-| `Records-<ep>.csv` | `topics.sh` (or a manual export) | `format.sh` |
+| `Records-<ep>.csv` | `topics.sh` (or a manual export); times moved by `audio.sh` when the cut changes | `format.sh` |
+| `Records-<ep>.cut` | `topics.sh`, `audio.sh` | `audio.sh` |
+| `cow<ep>.mp3.build` | `audio.sh` | `audio.sh` (reuse check), `status.sh` |
 | `topics-<ep>.review.txt`, `.llm.json`, `.timed.json` | `topics.sh` | review step |
 | `topics-<ep>.txt` | `format.sh` | `template-yt.sh` |
 | `topics-<ep>.md`, `chapters-<ep>.yml` | `format.sh` | `template-md.sh` |

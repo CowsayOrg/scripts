@@ -5,6 +5,7 @@
 # separated: cut, topics, site, youtube, backfill, all). Otherwise the script prints what is to be
 # reviewed and exits with NEEDS_REVIEW (3), the same code as a declined review.
 NEEDS_REVIEW=3
+CUT_PENDING=4    # audio.sh -p: the cut review is deferred to episode.sh, nothing was built
 
 headless() {
     [ "${COWSAY_HEADLESS:-}" = 1 ]

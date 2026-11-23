@@ -175,10 +175,20 @@ fi
 print_message "Episode $EPISODE_NUMBER: \"$EPISODE_TITLE\", source: ${FILE_SOURCE:-$YOUTUBE_URL}"
 
 # 1. Audio: raw -> transcript -> intro cut -> crop -> compress -> tag -> R2
+# Headless, an unapproved cut doesn't stop here (audio.sh -p): the topics are placed first, and both are
+# reviewed at once. Nothing is built or uploaded until the cut is approved; a new cut moves the topic times.
+if headless; then AUDIO_FLAGS+=(-p); fi
+CUT_PENDING_NOW=false
+AUDIO_STATUS=0
 if [ -n "$FILE_SOURCE" ]; then
-    ./audio.sh -e "$EPISODE_NUMBER" -l "$FILE_SOURCE" "${AUDIO_FLAGS[@]}"
+    ./audio.sh -e "$EPISODE_NUMBER" -l "$FILE_SOURCE" "${AUDIO_FLAGS[@]}" || AUDIO_STATUS=$?
 else
-    ./audio.sh -e "$EPISODE_NUMBER" -y "$YOUTUBE_URL" "${AUDIO_FLAGS[@]}"
+    ./audio.sh -e "$EPISODE_NUMBER" -y "$YOUTUBE_URL" "${AUDIO_FLAGS[@]}" || AUDIO_STATUS=$?
+fi
+if [ $AUDIO_STATUS -eq $CUT_PENDING ]; then
+    CUT_PENDING_NOW=true
+elif [ $AUDIO_STATUS -ne 0 ]; then
+    exit $AUDIO_STATUS
 fi
 
 # 2. Topics: transcript + Trello cards and their links -> Records-<ep>.csv
@@ -195,13 +205,21 @@ fi
 # 3. Review the topics before they go into the show notes
 
 if ! { headless && approved topics; }; then    # an approved headless run doesn't print them again
-    if [ -f "$REVIEW_FILE" ] && [ ! "$RECORDS_FILE" -nt "$REVIEW_FILE" ]; then    # Records edited by hand: show it
+    if [ -f "$REVIEW_FILE" ] && [ ! "$RECORDS_FILE" -nt "$REVIEW_FILE" ]; then
         cat "$REVIEW_FILE"
-    else
-        cat "$RECORDS_FILE"
+    else    # Records edited by hand or moved with the cut: time, title and how many links
+        print "Topics in ${RECORDS_FILE:t} (podcast time):"
+        csvformat -T "$RECORDS_FILE" | awk -F'\t' '{ n = ($3 == "" ? 0 : split($3, l, " "));
+            print "  " substr($1, 1, 8) "  " $2 (n ? "  (" n " link" (n > 1 ? "s" : "") ")" : "") }'
     fi
 fi
 if headless; then
+    if [ "$CUT_PENDING_NOW" = true ]; then
+        PENDING=(cut)
+        approved topics || PENDING+=(topics)
+        echo "NEEDS_REVIEW: ${(j:,:)PENDING} (the intro cut, or set COWSAY_CUT=<seconds> and the topic times move with it; edit $RECORDS_FILE to fix the topics). Rerun with COWSAY_APPROVE including \"${(j:,:)PENDING}\" to continue."
+        exit $NEEDS_REVIEW
+    fi
     gate topics "edit $RECORDS_FILE to fix them"
 else
     print_message "Use these topics? y / [n] / e to edit $RECORDS_FILE first"

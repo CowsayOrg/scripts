@@ -47,6 +47,7 @@ Because of the bucket's object lock, a fixed audio for an episode is uploaded as
 ```bash
 ./episode.sh -e 666 -u     # one episode
 ./episode.sh -a -u         # every episode streamed on YouTube but not published on cowsay.show yet
+./status.sh 666            # where an episode stands and what's next (read-only)
 ```
 The title comes from the YouTube stream. The recording is found in the episode folder or in ~/Downloads (as YouTube Studio names it), or downloaded from YouTube.
 
