@@ -2,7 +2,6 @@
 
 # Give an already published episode its YouTube show notes (topics with links and chapters), without
 # its audio and without a paid transcription: the topics are placed on YouTube's automatic captions.
-# The site post is not changed.
 #
 # Usage: ./youtube-notes.sh -e <episode> [-t "<title>"] [-r] [-n] [-v]
 #   -t  also rename the videos (youtube-update.sh -t)
@@ -12,6 +11,8 @@
 # Steps: stream.sh, the captions as transcript-<ep>.raw.json (providers/youtube.sh, on the video
 # timeline, so cut and YouTube offset are 0), the planned topics (trello.sh, or the post's topic list
 # when there is no Trello list), topics.sh, format.sh, template-yt.sh, youtube-update.sh.
+# The only change to the post is its chapter marks, and only when its audio is as long as the video
+# (with -n it just says so). publish.sh puts them on the site.
 
 SCRIPTS_DIR="${0:A:h}"
 cd "$SCRIPTS_DIR"
@@ -95,6 +96,30 @@ fi
 
 cd "$SCRIPTS_DIR"
 ./format.sh "$EP"
+
+# Chapters for the site player too. They are on the video timeline, so they only fit the post's
+# audio when it is the whole stream: its duration must match the video's.
+POST=$(find_post "$EP")
+CHAPTERS_FILE="$COWSAY_DIR/$EP/chapters-$EP.yml"
+if [ -z "$POST" ]; then
+    print_message "No post for episode $EP, the chapters go to YouTube only"
+elif [ ! -s "$CHAPTERS_FILE" ]; then
+    print_message "No chapters for episode $EP, the post is not changed"
+else
+    AUDIO_SECONDS=$(sed -n "s/^duration: *'\{0,1\}\([0-9:]*\)'\{0,1\}.*/\1/p" "$POST" \
+        | awk -F: '{ s = 0; for (i = 1; i <= NF; i++) s = s * 60 + $i; print s }')
+    VIDEO_SECONDS=$(jq -r '.duration // 0' "$COWSAY_DIR/$EP/stream-$EP.json")
+    DRIFT=$(( ${AUDIO_SECONDS:-0} - ${VIDEO_SECONDS%.*} ))
+    if [ -z "$AUDIO_SECONDS" ] || (( DRIFT > 15 || DRIFT < -15 )); then
+        print_message "$POST:t audio and the video differ by ${DRIFT}s, so the video's chapters don't fit it: the post is not changed"
+    elif [[ " ${UPDATE_FLAGS[*]} " == *" -n "* ]]; then
+        print_message "Dry run: would write $(grep -c '^  - ' "$CHAPTERS_FILE") chapters into $POST:t"
+    else
+        patch_post_chapters "$POST" "$CHAPTERS_FILE"
+        print_success "The chapters are in $POST:t, run ./publish.sh $EP to put them on the site 🐮"
+    fi
+fi
+
 ./template-yt.sh "$EP" > /dev/null
 [ -n "$TITLE" ] && UPDATE_FLAGS+=(-t "$TITLE")
 "$SCRIPTS_DIR/youtube-update.sh" -e "$EP" ${UPDATE_FLAGS[@]} ${VERBOSE_FLAG[@]}

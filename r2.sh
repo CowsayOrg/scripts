@@ -102,3 +102,15 @@ patch_post_audio() {
         { print }
     ' "$1" > "$tmp" && mv "$tmp" "$1"
 }
+
+# patch_post_chapters <post> <chapters.yml>: replace the post's chapter marks with the file's
+patch_post_chapters() {
+    local tmp="$1.tmp"
+    awk -v cf="$2" '
+        /^---/ { fm++; skip = 0 }
+        skip && /^  - / { next }
+        { skip = 0 }
+        fm == 1 && /^chapters:/ { print "chapters:"; while ((getline l < cf) > 0) print l; skip = 1; next }
+        { print }
+    ' "$1" > "$tmp" && mv "$tmp" "$1"
+}

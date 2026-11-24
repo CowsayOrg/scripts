@@ -677,11 +677,12 @@ The title is left as it is on YouTube, unless `-t "<title>"` is given: the main 
 ./youtube-notes.sh -e <episode> [-t "<title>"] [-r] [-n] [-v]
 ```
 
-For episodes whose post is on the site but whose YouTube description is still the stream's template. It needs neither the audio nor a paid transcription, and doesn't touch the post:
+For episodes whose post is on the site but whose YouTube description is still the stream's template. It needs neither the audio nor a paid transcription. The only change to the post is its chapter marks:
 
 1. `stream.sh`.
 2. If there is no `Records-<ep>.csv` (or with `-r`): YouTube's automatic captions as `transcript-<ep>.raw.json` (`providers/youtube.sh`). They are on the video timeline, so `cut-<ep>.txt` and `youtube-offset-<ep>.txt` are 0. Then the planned topics: `trello.sh`, or, without a Trello list, the topic list of the post (`### Temele săptămânii`). Then `topics.sh -r`.
 3. `format.sh`, `template-yt.sh`, `youtube-update.sh` (with `-t` and `-n` passed on).
+4. The chapters go into the post's `chapters:` too (`patch_post_chapters` in `r2.sh`), so the site player shows them. They are on the video timeline, so this only happens when the post's `duration:` is within 15 s of the video's; otherwise it says so and leaves the post alone. With `-n` it only says what it would write. `./publish.sh <ep>` puts them on the site.
 
 An existing `Records-<ep>.csv` (an old manual export) is used as it is: the old Records app marked the times on the stream, so they fit the video. In November 2026 this filled 155, 158, 159 and 162–173, and named 166 and 168–172.
 
